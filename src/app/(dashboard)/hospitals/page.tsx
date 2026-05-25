@@ -157,9 +157,9 @@ function OnboardModal({ onClose, onSuccess }: {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Portal URL</label>
                 <div className="flex items-center gap-1">
-                  <input value={form.portalUrl} onChange={e => setForm({ ...form, portalUrl: e.target.value })} placeholder="greenvalley.mediflow.io" className={inp} />
+                  <input value={form.portalUrl} onChange={e => setForm({ ...form, portalUrl: e.target.value })} placeholder="greenvalley.clinivio.ai" className={inp} />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">The URL where this hospital accesses MediFlow (optional)</p>
+                <p className="text-xs text-gray-400 mt-1">The URL where this hospital accesses Clinivio (optional)</p>
               </div>
             </div>
           </div>
@@ -277,8 +277,8 @@ function EditTenantModal({ tenant, onClose, onSuccess }: { tenant: Tenant; onClo
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Portal URL</label>
             <input value={form.portalUrl} onChange={e => setForm({ ...form, portalUrl: e.target.value })}
-              placeholder="greenvalley.mediflow.io" className={inp} />
-            <p className="text-xs text-gray-400 mt-1">The URL where this hospital accesses MediFlow</p>
+              placeholder="greenvalley.clinivio.ai" className={inp} />
+            <p className="text-xs text-gray-400 mt-1">The URL where this hospital accesses Clinivio</p>
           </div>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>

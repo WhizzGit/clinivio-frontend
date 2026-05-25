@@ -5,7 +5,7 @@ import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from "ax
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem("mediflow-auth");
+    const raw = localStorage.getItem("clinivio-auth");
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed?.state?.token ?? null;
@@ -50,7 +50,7 @@ function createApiInstance(baseURL: string): AxiosInstance {
       if (error.response?.status === 401) {
         // Clear auth state and redirect
         if (typeof window !== "undefined") {
-          localStorage.removeItem("mediflow-auth");
+          localStorage.removeItem("clinivio-auth");
           redirectToLogin();
         }
       }

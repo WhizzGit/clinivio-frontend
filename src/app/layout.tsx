@@ -6,7 +6,7 @@ import Providers from "@/components/Providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "MediFlow — Hospital Management System",
+  title: "Clinivio — Hospital Management System",
   description: "Comprehensive hospital management dashboard",
 };
 

@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Activity } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { cn } from '@/lib/utils';
 
@@ -34,9 +35,11 @@ export function Sidebar() {
     <aside className="w-60 flex-shrink-0 bg-slate-900 flex flex-col">
       <div className="p-5 border-b border-slate-700">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">M</div>
+          <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+            <Activity className="w-4 h-4 text-white" />
+          </div>
           <div>
-            <p className="text-white font-bold text-sm">MediFlow</p>
+            <p className="text-white font-bold text-sm">Clinivio</p>
             <p className="text-slate-400 text-xs">Hospital Management</p>
           </div>
         </div>

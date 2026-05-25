@@ -5,98 +5,44 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, Stethoscope, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Activity, AlertCircle, Building2, ChevronDown, ChevronUp } from "lucide-react";
 import { iamApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth.store";
 import { AuthResponse } from "@/types";
 import { cn } from "@/lib/utils";
 
 const TENANT_ID = "7297d065-93f1-4487-b497-0551965cf607";
+const TENANT_NAME = "HANSVL Healthcare";
 
+// ─── Demo personas (only seeded accounts) ────────────────────────────────────
+// Additional staff (doctors, nurses, etc.) are created by the tenant admin
+// from the dashboard — they don't appear here until provisioned.
 const PERSONAS = [
   {
     role: "SUPER_ADMIN",
-    label: "Super Admin",
+    label: "Platform Admin",
     emoji: "🌐",
-    name: "MediFlow Admin",
-    email: "superadmin@mediflow.io",
+    name: "Whizzon Admin",
+    email: "superadmin@whizzon.ai",
     password: "SuperAdmin@123",
     tenantId: null,
+    hospital: "Clinivio Platform",
     color: "bg-slate-50 border-slate-300 hover:border-slate-500",
     badge: "bg-slate-800 text-white",
-    desc: "Product owner — onboard hospitals, manage all tenants",
+    desc: "Manage hospitals & tenants across the platform",
   },
   {
     role: "ADMIN",
-    label: "Admin",
+    label: "Hospital Admin",
     emoji: "🏥",
-    name: "Vijay Kumar",
-    email: "admin@greenvalley.com",
+    name: "HANSVL Admin",
+    email: "admin@hansvl.com",
     password: "Admin@123",
     tenantId: TENANT_ID,
+    hospital: TENANT_NAME,
     color: "bg-violet-50 border-violet-200 hover:border-violet-400",
     badge: "bg-violet-100 text-violet-700",
-    desc: "Full access — staff, billing, settings",
-  },
-  {
-    role: "DOCTOR",
-    label: "Doctor",
-    emoji: "🩺",
-    name: "Dr. Rajesh Patel",
-    email: "dr.patel@greenvalley.com",
-    password: "Doctor@1234",
-    tenantId: TENANT_ID,
-    color: "bg-blue-50 border-blue-200 hover:border-blue-400",
-    badge: "bg-blue-100 text-blue-700",
-    desc: "Queue view, consultation, prescriptions",
-  },
-  {
-    role: "RECEPTIONIST",
-    label: "Receptionist",
-    emoji: "🗂️",
-    name: "Meena Sharma",
-    email: "reception@greenvalley.com",
-    password: "Reception@1234",
-    tenantId: TENANT_ID,
-    color: "bg-emerald-50 border-emerald-200 hover:border-emerald-400",
-    badge: "bg-emerald-100 text-emerald-700",
-    desc: "Register patients, book appointments, billing",
-  },
-  {
-    role: "NURSE",
-    label: "Nurse",
-    emoji: "💉",
-    name: "Kavitha Reddy",
-    email: "nurse@greenvalley.com",
-    password: "Nurse@1234",
-    tenantId: TENANT_ID,
-    color: "bg-pink-50 border-pink-200 hover:border-pink-400",
-    badge: "bg-pink-100 text-pink-700",
-    desc: "Vitals entry, doctor queue assistance",
-  },
-  {
-    role: "PHARMACIST",
-    label: "Pharmacist",
-    emoji: "💊",
-    name: "Ravi Shankar",
-    email: "pharmacist@greenvalley.com",
-    password: "Pharma@1234",
-    tenantId: TENANT_ID,
-    color: "bg-teal-50 border-teal-200 hover:border-teal-400",
-    badge: "bg-teal-100 text-teal-700",
-    desc: "Dispense prescriptions, manage inventory",
-  },
-  {
-    role: "LAB_TECHNICIAN",
-    label: "Lab Technician",
-    emoji: "🔬",
-    name: "Arjun Mehta",
-    email: "lab@greenvalley.com",
-    password: "Lab@1234",
-    tenantId: TENANT_ID,
-    color: "bg-cyan-50 border-cyan-200 hover:border-cyan-400",
-    badge: "bg-cyan-100 text-cyan-700",
-    desc: "Process lab orders, enter test results",
+    desc: "Full access — create staff, billing, settings",
   },
 ];
 
@@ -116,6 +62,7 @@ export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [showPassword, setShowPassword] = useState(false);
+  const [showTenantId, setShowTenantId] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [quickLoading, setQuickLoading] = useState<string | null>(null);
 
@@ -177,17 +124,29 @@ export default function LoginPage() {
         <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl" />
       </div>
 
-      <div className="relative w-full max-w-4xl flex flex-col lg:flex-row gap-6 items-start">
+      <div className="relative w-full max-w-3xl flex flex-col lg:flex-row gap-6 items-start">
 
-        {/* ── Persona picker ── */}
+        {/* ── Left: Branding + Quick login ── */}
         <div className="flex-1 min-w-0">
-          <div className="mb-4">
-            <p className="text-white font-semibold text-sm uppercase tracking-widest opacity-60">
-              Demo Personas
-            </p>
-            <p className="text-blue-200 text-sm mt-1">
-              Click any card to log in instantly
-            </p>
+
+          {/* Product branding */}
+          <div className="mb-6 flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/15 backdrop-blur rounded-xl flex items-center justify-center ring-2 ring-white/20">
+              <Activity className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-white font-extrabold text-lg tracking-tight leading-none">Clinivio</p>
+              <p className="text-blue-300 text-xs mt-0.5">by Whizzon.ai · Hospital Management</p>
+            </div>
+          </div>
+
+          {/* Active hospital context */}
+          <div className="mb-4 flex items-center gap-2 bg-white/10 backdrop-blur rounded-xl px-4 py-3 border border-white/10">
+            <Building2 className="w-4 h-4 text-blue-200 shrink-0" />
+            <div>
+              <p className="text-white text-sm font-semibold leading-none">{TENANT_NAME}</p>
+              <p className="text-blue-300 text-xs mt-0.5">Demo tenant · Tamil Nadu</p>
+            </div>
           </div>
 
           {serverError && (
@@ -197,7 +156,11 @@ export default function LoginPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* Persona cards */}
+          <p className="text-blue-200/70 text-xs font-semibold uppercase tracking-widest mb-2">
+            Quick Access
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {PERSONAS.map((p) => (
               <button
                 key={p.role}
@@ -220,119 +183,140 @@ export default function LoginPage() {
                 </div>
                 <p className="font-semibold text-gray-900 text-sm leading-tight">{p.name}</p>
                 <p className="text-xs text-gray-500 mt-0.5 leading-snug">{p.desc}</p>
-                <p className="text-xs text-gray-400 mt-2 font-mono truncate">{p.email}</p>
+                <div className="mt-2.5 space-y-0.5">
+                  <p className="text-xs text-gray-400 font-mono truncate">{p.email}</p>
+                  <div className="flex items-center gap-1.5">
+                    <Building2 className="w-3 h-3 text-gray-300 shrink-0" />
+                    <p className="text-xs text-gray-400 truncate">{p.hospital}</p>
+                  </div>
+                </div>
               </button>
             ))}
           </div>
 
-          <div className="mt-4 p-3 bg-white/10 rounded-xl backdrop-blur">
-            <p className="text-blue-100 text-xs font-semibold mb-1">
-              🏥 Green Valley Hospital
+          {/* Note about additional staff */}
+          <div className="mt-3 px-3 py-2.5 bg-white/5 rounded-xl border border-white/10">
+            <p className="text-blue-200/70 text-xs">
+              <span className="font-semibold text-blue-200">ℹ️  Staff accounts</span> — doctors, nurses, pharmacists are created by the Hospital Admin from the dashboard.
             </p>
-            <p className="text-blue-200/60 text-xs font-mono truncate">{TENANT_ID}</p>
           </div>
         </div>
 
-        {/* ── Manual login form ── */}
-        <div className="w-full lg:w-[340px] flex-shrink-0">
-          <div className="text-center mb-5">
-            <div className="inline-flex items-center justify-center w-14 h-14 bg-white/10 backdrop-blur rounded-2xl mb-3 ring-2 ring-white/20">
-              <Stethoscope className="w-7 h-7 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">MediFlow</h1>
-            <p className="text-blue-200 text-xs mt-0.5">Hospital Management System</p>
-          </div>
+        {/* ── Right: Manual login form ── */}
+        <div className="w-full lg:w-[320px] flex-shrink-0">
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
 
-          <div className="bg-white rounded-2xl shadow-2xl p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-4">Sign in manually</h2>
-
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email
-                </label>
-                <input
-                  {...register("email")}
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@hospital.com"
-                  className={cn(
-                    "w-full px-3 py-2 rounded-lg border text-sm bg-white transition-colors",
-                    "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                    errors.email ? "border-red-400 bg-red-50" : "border-gray-300 hover:border-gray-400"
-                  )}
-                />
-                {errors.email && (
-                  <p className="text-xs text-red-600 mt-1">{errors.email.message}</p>
-                )}
+            {/* Form header with hospital name */}
+            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-5 text-white">
+              <div className="flex items-center gap-2 mb-1">
+                <Activity className="w-4 h-4 opacity-80" />
+                <span className="font-bold text-sm tracking-wide">Clinivio</span>
               </div>
+              <div className="flex items-center gap-1.5 mt-2">
+                <Building2 className="w-3.5 h-3.5 opacity-70" />
+                <p className="text-xs text-blue-100 font-medium">{TENANT_NAME}</p>
+              </div>
+              <p className="text-blue-200 text-xs mt-0.5">Sign in to your account</p>
+            </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password
-                </label>
-                <div className="relative">
+            <div className="p-6">
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email / Username
+                  </label>
                   <input
-                    {...register("password")}
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    placeholder="••••••••"
+                    {...register("email")}
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@hansvl.com"
                     className={cn(
-                      "w-full px-3 py-2 pr-9 rounded-lg border text-sm bg-white transition-colors",
+                      "w-full px-3 py-2 rounded-lg border text-sm bg-white transition-colors",
                       "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                      errors.password ? "border-red-400 bg-red-50" : "border-gray-300 hover:border-gray-400"
+                      errors.email ? "border-red-400 bg-red-50" : "border-gray-300 hover:border-gray-400"
                     )}
                   />
+                  {errors.email && (
+                    <p className="text-xs text-red-600 mt-1">{errors.email.message}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      {...register("password")}
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      placeholder="••••••••"
+                      className={cn(
+                        "w-full px-3 py-2 pr-9 rounded-lg border text-sm bg-white transition-colors",
+                        "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                        errors.password ? "border-red-400 bg-red-50" : "border-gray-300 hover:border-gray-400"
+                      )}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {errors.password && (
+                    <p className="text-xs text-red-600 mt-1">{errors.password.message}</p>
+                  )}
+                </div>
+
+                {/* Collapsible tenant ID */}
+                <div>
                   <button
                     type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    tabIndex={-1}
+                    onClick={() => setShowTenantId(v => !v)}
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showTenantId ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    Hospital ID (advanced)
                   </button>
+                  {showTenantId && (
+                    <div className="mt-1.5">
+                      <input
+                        {...register("tenantId")}
+                        type="text"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs bg-gray-50 font-mono text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Leave blank when logging in as Platform Admin</p>
+                    </div>
+                  )}
                 </div>
-                {errors.password && (
-                  <p className="text-xs text-red-600 mt-1">{errors.password.message}</p>
-                )}
-              </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Tenant ID{" "}
-                  <span className="text-gray-400 font-normal text-xs">(pre-filled)</span>
-                </label>
-                <input
-                  {...register("tenantId")}
-                  type="text"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-gray-50 font-mono text-gray-400 focus:outline-none"
-                  readOnly
-                />
-              </div>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className={cn(
+                    "w-full py-2.5 px-4 rounded-lg text-sm font-semibold text-white transition-all",
+                    "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+                    "disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  )}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      Signing in…
+                    </>
+                  ) : (
+                    "Sign In"
+                  )}
+                </button>
+              </form>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className={cn(
-                  "w-full py-2 px-4 rounded-lg text-sm font-semibold text-white transition-all",
-                  "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
-                  "disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                )}
-              >
-                {isSubmitting ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    Signing in…
-                  </>
-                ) : (
-                  "Sign In"
-                )}
-              </button>
-            </form>
-
-            <p className="text-center text-xs text-gray-400 mt-4">
-              Protected by MediFlow security. All activity is logged.
-            </p>
+              <p className="text-center text-xs text-gray-400 mt-4">
+                Secured by Clinivio · All activity is logged
+              </p>
+            </div>
           </div>
         </div>
       </div>
