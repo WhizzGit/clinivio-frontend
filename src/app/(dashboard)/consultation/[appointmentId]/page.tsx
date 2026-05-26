@@ -502,7 +502,7 @@ export default function ConsultationPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Doctor's Notes <span className="text-gray-400 font-normal">(internal, not on prescription)</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Doctor &apos s Notes <span className="text-gray-400 font-normal">(internal, not on prescription)</span></label>
                 <textarea
                   rows={2}
                   value={doctorNotes}

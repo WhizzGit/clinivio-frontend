@@ -71,7 +71,7 @@ function CredentialsModal({ creds, title, onClose }: {
         </div>
         <div className="px-6 pb-5">
           <button onClick={onClose} className="w-full py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700">
-            Done — I've saved these credentials
+            Done — I &apos ve saved these credentials
           </button>
         </div>
       </div>
