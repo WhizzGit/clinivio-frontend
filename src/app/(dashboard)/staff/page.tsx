@@ -24,6 +24,7 @@ interface DoctorProfile {
   specialty?: string;
   qualification?: string;
   registrationNo?: string;
+  departmentId?: string;
   department?: { id: string; name: string; icon?: string };
   experienceYears?: number;
   consultationFee?: number;
@@ -164,7 +165,7 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
     qualification:  isDoc ? (dp?.qualification ?? '') : (sp?.qualification ?? ''),
     registrationNo: isDoc ? (dp?.registrationNo ?? '') : (sp?.registrationNo ?? ''),
     departmentId:   isDoc
-      ? (dp?.department?.id ?? (dp as any)?.departmentId ?? '')
+      ? (dp?.department?.id ?? dp?.departmentId ?? '')
       : (sp?.department?.id ?? sp?.departmentId ?? ''),
     joiningDate:    sp?.joiningDate ?? '',
     shift:          sp?.shift ?? '',
@@ -568,7 +569,8 @@ export default function StaffPage() {
   const tabCounts: Record<string, number> = { ALL: users.length };
   users.forEach(u => { tabCounts[u.role] = (tabCounts[u.role] ?? 0) + 1; });
 
-  const activeRoleForAdd = activeTab === 'ALL' ? null : activeTab;
+  // Doctors are enrolled via Doctors page — staff page only manages non-doctor roles
+  const activeRoleForAdd = (activeTab === 'ALL' || activeTab === 'DOCTOR') ? null : activeTab;
 
   return (
     <div>
@@ -677,7 +679,9 @@ export default function StaffPage() {
               ? 'No staff match your search'
               : activeTab === 'ALL'
                 ? 'No staff added yet'
-                : `No ${ROLE_META[activeTab]?.plural} added yet`}
+                : activeTab === 'DOCTOR'
+                  ? 'No doctors enrolled yet — use the Doctors page to add doctors'
+                  : `No ${ROLE_META[activeTab]?.plural} added yet`}
           </p>
           {!search && activeRoleForAdd && (
             <button onClick={() => setModal({ type: 'add', role: activeRoleForAdd })}
