@@ -659,6 +659,19 @@ export default function StaffPage() {
         })}
       </div>
 
+      {/* Doctor tab info banner */}
+      {activeTab === 'DOCTOR' && (
+        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3">
+          <span className="text-xl mt-0.5">👨‍⚕️</span>
+          <div>
+            <p className="text-sm font-medium text-blue-800">Doctors are enrolled from the Doctors page</p>
+            <p className="text-xs text-blue-600 mt-0.5">
+              Here you can update basic info, change their active status, and <strong>set passwords</strong> for system login.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <div className="mb-5">
         <input
