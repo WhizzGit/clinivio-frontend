@@ -45,7 +45,8 @@ export default function IPDPage() {
     try {
       const params = statusFilter === "active" ? "" : `?status=${statusFilter}`;
       const res = await appointmentApi.get(`/ipd/admissions${params}`);
-      setAdmissions(res.data);
+      // Backend returns { data: [...], pagination: {} } shape
+      setAdmissions(Array.isArray(res.data) ? res.data : (res.data?.data ?? []));
     } catch { setAdmissions([]); }
     finally { setLoading(false); }
   }

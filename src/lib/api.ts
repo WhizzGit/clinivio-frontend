@@ -61,23 +61,18 @@ function createApiInstance(baseURL: string): AxiosInstance {
   return instance;
 }
 
-// ─── Service instances ────────────────────────────────────────────────────────
+// ─── Single unified API base URL ──────────────────────────────────────────────
+// All former microservices are now served from one endpoint.
 
-export const iamApi = createApiInstance(
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
-);
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
-export const patientApi = createApiInstance(
-  process.env.NEXT_PUBLIC_PATIENT_API_URL || "http://localhost:3002"
-);
+// Export four named instances so existing imports keep working.
+// They all point to the same backend — no code changes needed in pages.
+export const iamApi         = createApiInstance(API_BASE);
+export const patientApi     = createApiInstance(API_BASE);
+export const appointmentApi = createApiInstance(API_BASE);
+export const billingApi     = createApiInstance(API_BASE);
 
-export const appointmentApi = createApiInstance(
-  process.env.NEXT_PUBLIC_APPOINTMENT_API_URL || "http://localhost:3003"
-);
-
-export const billingApi = createApiInstance(
-  process.env.NEXT_PUBLIC_BILLING_API_URL || "http://localhost:3006"
-);
-
-// Default export (IAM / gateway)
+// Default export (backwards compat)
 export default iamApi;

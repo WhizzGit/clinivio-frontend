@@ -80,18 +80,20 @@ function AdminAnalytics() {
     PACKAGE: { label: 'Packages', color: 'bg-pink-500' },
   };
 
-  const maxDeptCount = Math.max(...stats.departmentLoad.map(d => d.count), 1);
-  const totalRevenueByType = Object.values(stats.revenue.byType).reduce((a, b) => a + b, 0);
+  const deptLoad = stats.departmentLoad ?? [];
+  const maxDeptCount = Math.max(...deptLoad.map(d => d.count), 1);
+  const revenueByType = stats.revenue?.byType ?? {};
+  const totalRevenueByType = Object.values(revenueByType).reduce((a, b) => a + b, 0);
 
   return (
     <div className="space-y-5 mb-8">
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "Today's OPD/IPD", value: stats.today.appointments, sub: `${stats.today.ipdAdmissions} new IPD admissions`, icon: '🏥', color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', onClick: () => router.push('/appointments') },
-          { label: 'Active IPD', value: stats.ipd.activeAdmissions, sub: `${stats.ipd.occupancyRate}% bed occupancy`, icon: '🛏️', color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200', onClick: () => router.push('/ipd') },
-          { label: 'Revenue Today', value: fmt(stats.revenue.today), sub: `${fmt(stats.revenue.mtd)} this month`, icon: '💰', color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200', onClick: undefined },
-          { label: 'Pending Billing', value: stats.revenue.pendingCount, sub: `${fmt(stats.revenue.pendingAmount)} outstanding`, icon: '⏳', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200', onClick: undefined },
+          { label: "Today's OPD/IPD", value: stats.today?.appointments ?? 0, sub: `${stats.today?.ipdAdmissions ?? 0} new IPD admissions`, icon: '🏥', color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', onClick: () => router.push('/appointments') },
+          { label: 'Active IPD', value: stats.ipd?.activeAdmissions ?? 0, sub: `${stats.ipd?.occupancyRate ?? 0}% bed occupancy`, icon: '🛏️', color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200', onClick: () => router.push('/ipd') },
+          { label: 'Revenue Today', value: fmt(stats.revenue?.today ?? 0), sub: `${fmt(stats.revenue?.mtd ?? 0)} this month`, icon: '💰', color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200', onClick: undefined },
+          { label: 'Pending Billing', value: stats.revenue?.pendingCount ?? 0, sub: `${fmt(stats.revenue?.pendingAmount ?? 0)} outstanding`, icon: '⏳', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200', onClick: undefined },
         ].map(card => (
           <div key={card.label}
             onClick={card.onClick}
@@ -115,17 +117,17 @@ function AdminAnalytics() {
             <button onClick={() => router.push('/rooms')} className="text-xs text-blue-500 hover:underline">Manage Rooms →</button>
           </div>
           <div className="flex items-end gap-3 mb-3">
-            <p className="text-4xl font-bold text-gray-900">{stats.ipd.occupancyRate}%</p>
-            <p className="text-sm text-gray-500 mb-1">{stats.ipd.bedsOccupied} / {stats.ipd.bedsTotal} beds</p>
+            <p className="text-4xl font-bold text-gray-900">{stats.ipd?.occupancyRate ?? 0}%</p>
+            <p className="text-sm text-gray-500 mb-1">{stats.ipd?.bedsOccupied ?? 0} / {stats.ipd?.bedsTotal ?? 0} beds</p>
           </div>
           <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-2">
             <div
-              className={`h-full rounded-full transition-all ${stats.ipd.occupancyRate >= 90 ? 'bg-red-500' : stats.ipd.occupancyRate >= 70 ? 'bg-orange-500' : 'bg-green-500'}`}
-              style={{ width: `${stats.ipd.occupancyRate}%` }}
+              className={`h-full rounded-full transition-all ${(stats.ipd?.occupancyRate ?? 0) >= 90 ? 'bg-red-500' : (stats.ipd?.occupancyRate ?? 0) >= 70 ? 'bg-orange-500' : 'bg-green-500'}`}
+              style={{ width: `${stats.ipd?.occupancyRate ?? 0}%` }}
             />
           </div>
           <p className="text-xs text-gray-400">
-            {stats.ipd.bedsTotal - stats.ipd.bedsOccupied} beds available · {stats.ipd.activeAdmissions} active admissions
+            {(stats.ipd?.bedsTotal ?? 0) - (stats.ipd?.bedsOccupied ?? 0)} beds available · {stats.ipd?.activeAdmissions ?? 0} active admissions
           </p>
         </div>
 
@@ -137,9 +139,9 @@ function AdminAnalytics() {
           </div>
           <div className="space-y-2">
             {[
-              { label: 'Pending', value: stats.lab.pending, color: 'bg-yellow-400', textColor: 'text-yellow-700' },
-              { label: 'Processing', value: stats.lab.inProgress, color: 'bg-orange-400', textColor: 'text-orange-700' },
-              { label: 'Done Today', value: stats.lab.completedToday, color: 'bg-green-400', textColor: 'text-green-700' },
+              { label: 'Pending', value: stats.lab?.pending ?? 0, color: 'bg-yellow-400', textColor: 'text-yellow-700' },
+              { label: 'Processing', value: stats.lab?.inProgress ?? 0, color: 'bg-orange-400', textColor: 'text-orange-700' },
+              { label: 'Done Today', value: stats.lab?.completedToday ?? 0, color: 'bg-green-400', textColor: 'text-green-700' },
             ].map(item => (
               <div key={item.label} className="flex items-center gap-3">
                 <div className={`w-2.5 h-2.5 rounded-full ${item.color} flex-shrink-0`} />
@@ -151,18 +153,18 @@ function AdminAnalytics() {
             ))}
           </div>
           <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400">
-            {stats.lab.pending + stats.lab.inProgress} tests in queue
+            {(stats.lab?.pending ?? 0) + (stats.lab?.inProgress ?? 0)} tests in queue
           </div>
         </div>
 
         {/* Revenue by type */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue Mix (MTD)</h3>
-          {Object.keys(stats.revenue.byType).length === 0 ? (
+          {Object.keys(revenueByType).length === 0 ? (
             <p className="text-xs text-gray-400 text-center py-4">No paid invoices this month yet</p>
           ) : (
             <div className="space-y-2">
-              {Object.entries(stats.revenue.byType).sort(([, a], [, b]) => b - a).map(([type, amount]) => {
+              {Object.entries(revenueByType).sort(([, a], [, b]) => b - a).map(([type, amount]) => {
                 const pct = totalRevenueByType > 0 ? Math.round((amount / totalRevenueByType) * 100) : 0;
                 const cfg = invoiceTypes[type] || { label: type, color: 'bg-gray-400' };
                 return (
@@ -186,20 +188,20 @@ function AdminAnalytics() {
             </div>
           )}
           <div className="mt-3 pt-3 border-t border-gray-100">
-            <p className="text-xs text-gray-500">Total: <span className="font-bold text-gray-900">{fmt(stats.revenue.mtd)}</span></p>
+            <p className="text-xs text-gray-500">Total: <span className="font-bold text-gray-900">{fmt(stats.revenue?.mtd ?? 0)}</span></p>
           </div>
         </div>
       </div>
 
       {/* Department load */}
-      {stats.departmentLoad.length > 0 && (
+      {deptLoad.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-gray-900">Department Load Today</h3>
-            <span className="text-xs text-gray-400">{stats.today.appointments} total appointments</span>
+            <span className="text-xs text-gray-400">{stats.today?.appointments ?? 0} total appointments</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {stats.departmentLoad.map(d => {
+            {deptLoad.map(d => {
               const pct = Math.round((d.count / maxDeptCount) * 100);
               return (
                 <div key={d.department.id} className="text-center">

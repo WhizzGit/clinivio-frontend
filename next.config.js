@@ -2,10 +2,9 @@
 const nextConfig = {
   experimental: { serverComponentsExternalPackages: ['socket.io-client'] },
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
-    NEXT_PUBLIC_PATIENT_API_URL: process.env.NEXT_PUBLIC_PATIENT_API_URL || 'http://localhost:3002',
-    NEXT_PUBLIC_APPOINTMENT_API_URL: process.env.NEXT_PUBLIC_APPOINTMENT_API_URL || 'http://localhost:3003',
-    NEXT_PUBLIC_BILLING_API_URL: process.env.NEXT_PUBLIC_BILLING_API_URL || 'http://localhost:3006',
+    // All backend routes are served from a single unified API service.
+    // In production, set this to your Render service URL.
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000',
   },
 };
 module.exports = nextConfig;

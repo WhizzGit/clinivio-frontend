@@ -470,7 +470,7 @@ export default function PharmacyPage() {
     try {
       const params = filterStatus ? `?status=${filterStatus}` : '';
       const res = await appointmentApi.get(`/pharmacy/orders${params}`);
-      setOrders(res.data || []);
+      setOrders(Array.isArray(res.data) ? res.data : (res.data?.data ?? []));
     } finally {
       setOrdersLoading(false);
     }
@@ -489,7 +489,7 @@ export default function PharmacyPage() {
       if (invSearch) params.set('q', invSearch);
       if (lowStockOnly) params.set('lowStock', 'true');
       const res = await appointmentApi.get(`/pharmacy/inventory?${params}`);
-      setInventory(res.data || []);
+      setInventory(Array.isArray(res.data) ? res.data : (res.data?.data ?? []));
     } finally {
       setInvLoading(false);
     }
