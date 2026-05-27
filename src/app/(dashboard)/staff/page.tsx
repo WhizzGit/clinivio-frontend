@@ -60,7 +60,7 @@ const ROLE_META: Record<string, {
   ADMIN:         { label: 'Admin',        plural: 'Admins',        emoji: '⚙️', color: 'text-purple-700',  bg: 'bg-purple-100',  regLabel: 'Employee ID', qualPlaceholder: '', specLabel: '', specPlaceholder: '' },
 };
 
-const TABS = ['ALL', 'NURSE', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PHARMACIST'];
+const TABS = ['ALL', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PHARMACIST'];
 const SHIFTS = ['MORNING', 'AFTERNOON', 'NIGHT', 'ROTATIONAL'];
 
 // ─── Shared Input Style ───────────────────────────────────────────────────────
@@ -456,8 +456,8 @@ export default function StaffPage() {
       const res = await iamApi.get('/users?limit=200');
       const body = res.data;
       const all: StaffUser[] = body?.data || body || [];
-      // Show only non-doctor, non-admin staff (or all based on tab)
-      setUsers(all.filter(u => !['DOCTOR', 'SUPER_ADMIN', 'ADMIN'].includes(u.role)));
+      // Include all staff + doctors; exclude platform-level admins
+      setUsers(all.filter(u => !['SUPER_ADMIN', 'ADMIN'].includes(u.role)));
     } finally {
       setLoading(false);
     }
