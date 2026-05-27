@@ -148,7 +148,9 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const sp = user?.staffProfile;
+  const sp   = user?.staffProfile;
+  const dp   = user?.doctorProfile;
+  const isDoc = role === 'DOCTOR';
   const meta = ROLE_META[role] ?? ROLE_META.ALL;
 
   const [form, setForm] = useState<StaffFormState>({
@@ -159,13 +161,17 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
     password:  '',
     isActive:  user?.isActive !== false,
     employeeId:     sp?.employeeId ?? '',
-    qualification:  sp?.qualification ?? '',
-    registrationNo: sp?.registrationNo ?? '',
-    departmentId:   sp?.department?.id ?? sp?.departmentId ?? '',
+    qualification:  isDoc ? (dp?.qualification ?? '') : (sp?.qualification ?? ''),
+    registrationNo: isDoc ? (dp?.registrationNo ?? '') : (sp?.registrationNo ?? ''),
+    departmentId:   isDoc
+      ? (dp?.department?.id ?? (dp as any)?.departmentId ?? '')
+      : (sp?.department?.id ?? sp?.departmentId ?? ''),
     joiningDate:    sp?.joiningDate ?? '',
     shift:          sp?.shift ?? '',
-    experienceYears: sp?.experienceYears != null ? String(sp.experienceYears) : '',
-    specialization: sp?.specialization ?? '',
+    experienceYears: isDoc
+      ? (dp?.experienceYears != null ? String(dp.experienceYears) : '')
+      : (sp?.experienceYears != null ? String(sp.experienceYears) : ''),
+    specialization: isDoc ? (dp?.specialty ?? '') : (sp?.specialization ?? ''),
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState<string | null>(null);
@@ -178,19 +184,27 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
     e.preventDefault();
     setSaving(true); setError(null);
     try {
-      const payload: any = {
+      const base: any = {
         firstName: form.firstName,
         lastName:  form.lastName,
         phone: form.phone || undefined,
         qualification:  form.qualification  || undefined,
         registrationNo: form.registrationNo || undefined,
         departmentId:   form.departmentId   || undefined,
-        joiningDate:    form.joiningDate    || undefined,
-        shift:          form.shift          || undefined,
         experienceYears: form.experienceYears ? parseInt(form.experienceYears) : undefined,
-        specialization: form.specialization || undefined,
-        employeeId:     form.employeeId     || undefined,
       };
+
+      // Role-specific fields
+      if (isDoc) {
+        base.specialty = form.specialization || undefined;
+      } else {
+        base.specialization = form.specialization || undefined;
+        base.employeeId     = form.employeeId     || undefined;
+        base.joiningDate    = form.joiningDate    || undefined;
+        base.shift          = form.shift          || undefined;
+      }
+
+      const payload = { ...base };
       if (mode === 'add') {
         payload.email    = form.email;
         payload.password = form.password;
@@ -262,12 +276,14 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
                 <label className={lbl}>{meta.regLabel}</label>
                 <input value={form.registrationNo} onChange={f('registrationNo')} placeholder="e.g. KNC-2024-1234" className={inp} />
               </div>
-              <div>
-                <label className={lbl}>Employee ID</label>
-                <input value={form.employeeId} onChange={f('employeeId')} placeholder="EMP-001" className={inp} />
-              </div>
+              {!isDoc && (
+                <div>
+                  <label className={lbl}>Employee ID</label>
+                  <input value={form.employeeId} onChange={f('employeeId')} placeholder="EMP-001" className={inp} />
+                </div>
+              )}
               {meta.specPlaceholder && (
-                <div className="col-span-2">
+                <div className={isDoc ? 'col-span-2' : 'col-span-2'}>
                   <label className={lbl}>{meta.specLabel}</label>
                   <input value={form.specialization} onChange={f('specialization')} placeholder={meta.specPlaceholder} className={inp} />
                 </div>
@@ -276,26 +292,30 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
                 <label className={lbl}>Experience (yrs)</label>
                 <input type="number" min="0" value={form.experienceYears} onChange={f('experienceYears')} placeholder="3" className={inp} />
               </div>
+              {!isDoc && (
+                <div>
+                  <label className={lbl}>Joining Date</label>
+                  <input type="date" value={form.joiningDate} onChange={f('joiningDate')} className={inp} />
+                </div>
+              )}
               <div>
-                <label className={lbl}>Joining Date</label>
-                <input type="date" value={form.joiningDate} onChange={f('joiningDate')} className={inp} />
-              </div>
-              <div>
-                <label className={lbl}>Department / Ward</label>
+                <label className={lbl}>Department</label>
                 <select value={form.departmentId} onChange={f('departmentId')}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                   <option value="">— None —</option>
                   {departments.map(d => <option key={d.id} value={d.id}>{d.icon} {d.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className={lbl}>Shift</label>
-                <select value={form.shift} onChange={f('shift')}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                  <option value="">— Not set —</option>
-                  {SHIFTS.map(s => <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>)}
-                </select>
-              </div>
+              {!isDoc && (
+                <div>
+                  <label className={lbl}>Shift</label>
+                  <select value={form.shift} onChange={f('shift')}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value="">— Not set —</option>
+                    {SHIFTS.map(s => <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -339,6 +359,8 @@ function StaffCard({ user, onEdit, onSetPassword }: {
 }) {
   const meta = ROLE_META[user.role] ?? ROLE_META.ALL;
   const sp   = user.staffProfile;
+  const dp   = user.doctorProfile;
+  const isDoctor = user.role === 'DOCTOR';
 
   return (
     <div className={`bg-white rounded-xl border border-gray-200 p-4 transition-shadow hover:shadow-md ${!user.isActive ? 'opacity-60' : ''}`}>
@@ -359,8 +381,56 @@ function StaffCard({ user, onEdit, onSetPassword }: {
         </div>
       </div>
 
-      {/* Profile details */}
-      {sp && (
+      {/* Doctor profile details */}
+      {isDoctor && dp && (
+        <div className="space-y-1 text-xs text-gray-500 mb-3">
+          {dp.registrationNo && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">📋</span>
+              <span className="font-mono">{dp.registrationNo}</span>
+            </div>
+          )}
+          {dp.specialty && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">🏷</span>
+              <span>{dp.specialty}</span>
+            </div>
+          )}
+          {dp.qualification && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">🎓</span>
+              <span>{dp.qualification}</span>
+            </div>
+          )}
+          {dp.department && (
+            <div className="flex items-center gap-1.5">
+              <span>{dp.department.icon || '🏥'}</span>
+              <span>{dp.department.name}</span>
+            </div>
+          )}
+          {dp.experienceYears != null && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">⏱</span>
+              <span>{dp.experienceYears} yrs experience</span>
+            </div>
+          )}
+          {dp.consultationFee != null && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">💰</span>
+              <span>₹{dp.consultationFee} / visit</span>
+            </div>
+          )}
+          {user.phone && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-400">📱</span>
+              <span>{user.phone}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Non-doctor staff profile details */}
+      {!isDoctor && sp && (
         <div className="space-y-1 text-xs text-gray-500 mb-3">
           {sp.registrationNo && (
             <div className="flex items-center gap-1.5">
@@ -423,7 +493,7 @@ function StaffCard({ user, onEdit, onSetPassword }: {
       <div className="flex gap-2 pt-2 border-t border-gray-100">
         <button onClick={onEdit}
           className="flex-1 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
-          Edit Details
+          {isDoctor ? 'Basic Info' : 'Edit Details'}
         </button>
         <button onClick={onSetPassword}
           className="flex-1 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors">
@@ -489,7 +559,9 @@ export default function StaffPage() {
       || `${u.firstName} ${u.lastName}`.toLowerCase().includes(q)
       || u.email.toLowerCase().includes(q)
       || (u.staffProfile?.registrationNo?.toLowerCase().includes(q) ?? false)
-      || (u.staffProfile?.specialization?.toLowerCase().includes(q) ?? false);
+      || (u.staffProfile?.specialization?.toLowerCase().includes(q) ?? false)
+      || (u.doctorProfile?.registrationNo?.toLowerCase().includes(q) ?? false)
+      || (u.doctorProfile?.specialty?.toLowerCase().includes(q) ?? false);
     return matchTab && matchSearch;
   });
 
@@ -519,9 +591,9 @@ export default function StaffPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Staff Management</h1>
+          <h1 className="text-xl font-bold text-gray-900">Staff & Passwords</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Onboard and manage nurses, receptionists, lab technicians and pharmacists
+            Manage staff, set passwords — doctors, nurses, receptionists, lab technicians, pharmacists
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -538,13 +610,16 @@ export default function StaffPage() {
               <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2">
                 <span className="text-base leading-none">+</span> Add Staff ▾
               </button>
-              <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-lg z-20 hidden group-hover:block">
+              <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-20 hidden group-hover:block">
                 {['NURSE', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PHARMACIST'].map(r => (
                   <button key={r} onClick={() => setModal({ type: 'add', role: r })}
-                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl flex items-center gap-2">
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-xl flex items-center gap-2">
                     <span>{ROLE_META[r].emoji}</span> {ROLE_META[r].label}
                   </button>
                 ))}
+                <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100 rounded-b-xl">
+                  👨‍⚕️ To add doctors, use the <span className="font-medium text-blue-500">Doctors</span> page
+                </div>
               </div>
             </div>
           )}
