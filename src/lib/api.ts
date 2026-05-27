@@ -65,7 +65,7 @@ function createApiInstance(baseURL: string): AxiosInstance {
 // All former microservices are now served from one endpoint.
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+  process.env.NEXT_PUBLIC_API_URL || "https://clinivio-backend.onrender.com";
 
 // Export four named instances so existing imports keep working.
 // They all point to the same backend — no code changes needed in pages.
