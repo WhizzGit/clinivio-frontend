@@ -6,8 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
-  Eye, EyeOff, Activity, AlertCircle,
-  Building2, ChevronDown, ChevronUp,
+  Eye, EyeOff, Activity, AlertCircle, Building2,
 } from "lucide-react";
 import { iamApi } from "@/lib/api";
 import { useAuthStore } from "@/store/auth.store";
@@ -19,10 +18,10 @@ import { cn } from "@/lib/utils";
 const loginSchema = z.object({
   email:    z.string().email("Enter a valid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
-  tenantId: z
+  // Hospital slug — leave blank to log in as Platform Admin (SUPER_ADMIN)
+  slug: z
     .string()
-    .uuid("Must be a valid UUID")
-    .or(z.string().length(0))
+    .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^$/, "Only lowercase letters, numbers and hyphens")
     .optional(),
 });
 
@@ -41,18 +40,20 @@ export default function LoginPage() {
   const router  = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
 
-  const [showPassword,  setShowPassword]  = useState(false);
-  const [showTenantId,  setShowTenantId]  = useState(false);
-  const [serverError,   setServerError]   = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [serverError,  setServerError]  = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: "", password: "", tenantId: "" },
+    defaultValues: { email: "", password: "", slug: "" },
   });
+
+  const slugValue = watch("slug") ?? "";
 
   async function onSubmit(values: LoginFormValues) {
     setServerError(null);
@@ -61,7 +62,8 @@ export default function LoginPage() {
         email:    values.email,
         password: values.password,
       };
-      if (values.tenantId) payload.tenantId = values.tenantId;
+      // Only send slug if the user filled it in (blank = Platform Admin)
+      if (values.slug?.trim()) payload.slug = values.slug.trim();
 
       const { data } = await iamApi.post<AuthResponse>("/auth/login", payload);
       setAuth(data.user, data.accessToken, data.refreshToken);
@@ -73,6 +75,8 @@ export default function LoginPage() {
       );
     }
   }
+
+  const isHospitalLogin = slugValue.trim().length > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-blue-900 to-blue-800 flex items-center justify-center p-6">
@@ -104,7 +108,8 @@ export default function LoginPage() {
             Your Hospital.<br />Fully Managed.
           </h1>
           <p className="text-blue-200 text-base leading-relaxed mb-8 max-w-sm">
-            A complete platform for managing patients, doctors, pharmacy, billing, and more — purpose-built for modern hospitals.
+            A complete platform for managing patients, doctors, pharmacy,
+            billing, and more — purpose-built for modern hospitals.
           </p>
 
           {/* Feature pills */}
@@ -124,13 +129,16 @@ export default function LoginPage() {
             ))}
           </div>
 
-          {/* Staff note */}
-          <div className="mt-8 px-4 py-3 bg-white/5 rounded-xl border border-white/10">
-            <p className="text-blue-200/80 text-xs leading-relaxed">
-              <span className="font-semibold text-blue-200">ℹ️ Hospital staff</span> — doctors, nurses, and
-              pharmacists log in using credentials created by their Hospital Admin.
-              Platform admins can onboard new hospitals from the dashboard.
-            </p>
+          {/* Login guidance */}
+          <div className="mt-8 space-y-2">
+            <div className="px-4 py-3 bg-white/5 rounded-xl border border-white/10">
+              <p className="text-blue-200 text-xs font-semibold mb-1">Platform Admin</p>
+              <p className="text-blue-300/70 text-xs">Leave Hospital ID blank and sign in with your platform credentials.</p>
+            </div>
+            <div className="px-4 py-3 bg-white/5 rounded-xl border border-white/10">
+              <p className="text-blue-200 text-xs font-semibold mb-1">Hospital Staff (Admin / Doctor / Nurse…)</p>
+              <p className="text-blue-300/70 text-xs">Enter your Hospital ID (e.g. <span className="font-mono">citihospital</span>) then sign in with your credentials.</p>
+            </div>
           </div>
         </div>
 
@@ -138,16 +146,32 @@ export default function LoginPage() {
         <div className="w-full lg:w-[360px] flex-shrink-0">
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
 
-            {/* Form header */}
-            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-5 text-white">
+            {/* Dynamic header — changes based on whether slug is filled */}
+            <div className={cn(
+              "px-6 py-5 text-white transition-all",
+              isHospitalLogin
+                ? "bg-gradient-to-r from-violet-600 to-indigo-600"
+                : "bg-gradient-to-r from-indigo-600 to-blue-600"
+            )}>
               <div className="flex items-center gap-2 mb-2">
                 <Activity className="w-4 h-4 opacity-80" />
                 <span className="font-bold text-sm tracking-wide">Clinivio</span>
               </div>
-              <p className="text-white font-semibold text-base">Sign in to your account</p>
-              <p className="text-blue-200 text-xs mt-0.5">
-                Platform Admin · Hospital Admin · Staff
-              </p>
+              {isHospitalLogin ? (
+                <>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <Building2 className="w-3.5 h-3.5 opacity-70" />
+                    <p className="text-violet-100 text-xs font-mono font-medium">{slugValue}</p>
+                  </div>
+                  <p className="text-white font-semibold text-base">Hospital Sign In</p>
+                  <p className="text-violet-200 text-xs mt-0.5">Sign in with your staff credentials</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-white font-semibold text-base">Sign in to Clinivio</p>
+                  <p className="text-blue-200 text-xs mt-0.5">Platform Admin · Hospital Staff</p>
+                </>
+              )}
             </div>
 
             <div className="p-6 space-y-4">
@@ -160,16 +184,43 @@ export default function LoginPage() {
               )}
 
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+
+                {/* Hospital ID (slug) — always visible */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Hospital ID
+                    <span className="ml-1.5 text-xs font-normal text-gray-400">(leave blank for Platform Admin)</span>
+                  </label>
+                  <div className="relative">
+                    <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
+                    <input
+                      {...register("slug")}
+                      type="text"
+                      autoComplete="organization"
+                      placeholder="e.g. citihospital"
+                      className={cn(
+                        "w-full pl-9 pr-3 py-2.5 rounded-lg border text-sm bg-white transition-colors font-mono",
+                        "placeholder:text-gray-300 placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                        errors.slug
+                          ? "border-red-400 bg-red-50"
+                          : "border-gray-300 hover:border-gray-400"
+                      )}
+                    />
+                  </div>
+                  {errors.slug && (
+                    <p className="text-xs text-red-600 mt-1">{errors.slug.message}</p>
+                  )}
+                </div>
+
                 {/* Email */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email / Username
+                    Email
                   </label>
                   <input
                     {...register("email")}
                     type="email"
                     autoComplete="email"
-                    autoFocus
                     placeholder="you@example.com"
                     className={cn(
                       "w-full px-3 py-2.5 rounded-lg border text-sm bg-white transition-colors",
@@ -217,42 +268,17 @@ export default function LoginPage() {
                   )}
                 </div>
 
-                {/* Collapsible Hospital ID */}
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowTenantId((v) => !v)}
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    {showTenantId
-                      ? <ChevronUp className="w-3 h-3" />
-                      : <ChevronDown className="w-3 h-3" />}
-                    Hospital ID <span className="text-gray-300 ml-0.5">(advanced)</span>
-                  </button>
-                  {showTenantId && (
-                    <div className="mt-2">
-                      <input
-                        {...register("tenantId")}
-                        type="text"
-                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-xs bg-gray-50 font-mono text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-300 placeholder:text-gray-300"
-                      />
-                      <p className="text-xs text-gray-400 mt-1 flex items-start gap-1">
-                        <Building2 className="w-3 h-3 mt-0.5 shrink-0" />
-                        Required for Hospital staff. Leave blank for Platform Admin login.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
                 {/* Submit */}
                 <button
                   type="submit"
                   disabled={isSubmitting}
                   className={cn(
                     "w-full py-2.5 px-4 rounded-lg text-sm font-semibold text-white transition-all",
-                    "bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
-                    "disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    "focus:outline-none focus:ring-2 focus:ring-offset-2",
+                    "disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2",
+                    isHospitalLogin
+                      ? "bg-violet-600 hover:bg-violet-700 focus:ring-violet-500"
+                      : "bg-blue-600 hover:bg-blue-700 focus:ring-blue-500"
                   )}
                 >
                   {isSubmitting ? (
