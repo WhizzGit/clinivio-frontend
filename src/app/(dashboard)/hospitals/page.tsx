@@ -69,7 +69,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // ── Credentials modal ──────────────────────────────────────────────────────────
 
 function CredentialsModal({ creds, title, onClose }: {
-  creds: { email: string; password?: string; temporaryPassword?: string; tenantId: string; adminName: string };
+  creds: {
+    email: string;
+    password?: string;
+    temporaryPassword?: string;
+    tenantId: string;
+    tenantSlug?: string;
+    adminName: string;
+  };
   title: string;
   onClose: () => void;
 }) {
@@ -88,10 +95,30 @@ function CredentialsModal({ creds, title, onClose }: {
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
             Save these credentials now — the password cannot be retrieved again.
           </div>
+
+          {/* Hospital ID — most important for login, shown first and highlighted */}
+          {creds.tenantSlug && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg px-3 py-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-blue-500 font-semibold mb-0.5">Hospital ID <span className="font-normal">(required at login)</span></p>
+                  <p className="text-base font-bold text-blue-700 font-mono tracking-wide">{creds.tenantSlug}</p>
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(creds.tenantSlug!)}
+                  className="text-xs text-blue-600 hover:text-blue-800 ml-3 flex-shrink-0 px-2 py-1 bg-blue-100 rounded-md">
+                  Copy
+                </button>
+              </div>
+              <p className="text-xs text-blue-400 mt-1.5">
+                Hospital staff enter this in the <span className="font-semibold">Hospital ID</span> field on the login page.
+              </p>
+            </div>
+          )}
+
           <CredentialBox label="Admin Name"   value={creds.adminName} />
           <CredentialBox label="Login Email"  value={creds.email}     mono />
           <CredentialBox label="Password"     value={password}        mono />
-          <CredentialBox label="Tenant ID"    value={creds.tenantId}  mono />
         </div>
         <div className="px-6 pb-5">
           <button onClick={onClose}
@@ -111,13 +138,18 @@ function OnboardModal({ onClose, onSuccess }: {
   onSuccess: (creds: any) => void;
 }) {
   const [form, setForm] = useState({
-    name: '', city: '', state: '', address: '', pincode: '',
+    name: '', slug: '', city: '', state: '', address: '', pincode: '',
     phone: '', email: '', website: '',
     gstin: '', drugLicenseNo: '',
     portalUrl: '', whatsappPhoneNumberId: '', wabaId: '',
     subscriptionTier: 'BASIC',
     adminFirstName: '', adminLastName: '', adminEmail: '', adminPassword: '', adminPhone: '',
   });
+
+  // Auto-generate slug preview from name (used inline in JSX below)
+  function previewSlug(name: string) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+  }
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState<string | null>(null);
   const [showPwd, setShowPwd] = useState(false);
@@ -163,6 +195,24 @@ function OnboardModal({ onClose, onSuccess }: {
                 <label className="block text-xs font-medium text-gray-600 mb-1">Hospital Name *</label>
                 <input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
                   placeholder="City General Hospital" className={inp} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Hospital ID (slug)
+                  <span className="ml-1 font-normal text-gray-400">— staff use this to log in</span>
+                </label>
+                <input
+                  value={form.slug}
+                  onChange={e => setForm({ ...form, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                  placeholder="leave blank to auto-generate"
+                  className={inp + ' font-mono'}
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Lowercase letters, numbers, hyphens only.{' '}
+                  {!form.slug && form.name && (
+                    <>Will be: <span className="font-mono font-medium text-gray-600">{previewSlug(form.name)}</span></>
+                  )}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-medium text-gray-600 mb-1">City</label>
@@ -612,7 +662,15 @@ export default function HospitalsPage() {
     setResetting(tenant.id);
     try {
       const res = await iamApi.post(`/tenants/${tenant.id}/reset-admin-password`);
-      setModal({ type: 'credentials', creds: { ...res.data, tenantId: tenant.id }, title: `New Credentials — ${tenant.name}` });
+      setModal({
+        type: 'credentials',
+        creds: {
+          ...res.data,
+          tenantId:   tenant.id,
+          tenantSlug: res.data.tenantSlug ?? tenant.slug ?? undefined,
+        },
+        title: `New Credentials — ${tenant.name}`,
+      });
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       showToast(e?.response?.data?.message || 'Failed to reset password', 'error');
@@ -734,10 +792,12 @@ export default function HospitalsPage() {
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-900">{t.name}</p>
                       <p className="text-xs text-gray-400">{[t.city, t.state].filter(Boolean).join(', ') || '—'}</p>
-                      {t.portalUrl
-                        ? <p className="text-xs text-blue-500 font-mono mt-0.5 truncate max-w-[160px]" title={t.portalUrl}>{t.portalUrl}</p>
-                        : <p className="text-xs text-gray-300 font-mono mt-0.5">{t.id.slice(0, 8)}…</p>
-                      }
+                      {t.slug && (
+                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded text-xs font-mono text-indigo-600"
+                          title="Hospital ID — staff use this to log in">
+                          🔑 {t.slug}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-800">{t.adminName ?? '—'}</p>
