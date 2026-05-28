@@ -5,6 +5,110 @@ import { iamApi } from '@/lib/api';
 
 type Tab = 'profile' | 'hospital' | 'security';
 
+
+// ── Security / change-password tab ────────────────────────────────────────────
+
+function SecurityTab({ userId, tenantId, role }: { userId?: string; tenantId?: string; role?: string }) {
+  const inp = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
+  const [form, setForm]   = useState({ current: '', next: '', confirm: '' });
+  const [show, setShow]   = useState({ current: false, next: false, confirm: false });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg]     = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (form.next.length < 8) { setMsg({ type: 'error', text: 'New password must be at least 8 characters.' }); return; }
+    if (form.next !== form.confirm) { setMsg({ type: 'error', text: 'New passwords do not match.' }); return; }
+    setSaving(true);
+    try {
+      await iamApi.patch('/auth/change-password', {
+        currentPassword: form.current,
+        newPassword:     form.next,
+      });
+      setMsg({ type: 'success', text: 'Password changed successfully. Use the new password on your next login.' });
+      setForm({ current: '', next: '', confirm: '' });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setMsg({ type: 'error', text: e?.response?.data?.message || 'Failed to change password.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function PasswordInput({ field, label }: { field: 'current' | 'next' | 'confirm'; label: string }) {
+    return (
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+        <div className="relative">
+          <input
+            type={show[field] ? 'text' : 'password'}
+            value={form[field]}
+            onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+            required
+            className={inp + ' pr-10'}
+          />
+          <button type="button" tabIndex={-1}
+            onClick={() => setShow(s => ({ ...s, [field]: !s[field] }))}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+            {show[field] ? 'Hide' : 'Show'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Change password */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-sm font-semibold text-gray-900 mb-1">Change Password</h2>
+        <p className="text-xs text-gray-400 mb-5">Enter your current password, then choose a new one.</p>
+
+        {msg && (
+          <div className={`mb-4 text-sm rounded-lg px-4 py-2.5 border ${
+            msg.type === 'success'
+              ? 'bg-green-50 border-green-200 text-green-700'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>
+            {msg.text}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <PasswordInput field="current" label="Current Password" />
+          <PasswordInput field="next"    label="New Password (min 8 chars)" />
+          <PasswordInput field="confirm" label="Confirm New Password" />
+          <button type="submit" disabled={saving}
+            className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
+            {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+            {saving ? 'Changing…' : 'Change Password'}
+          </button>
+        </form>
+      </div>
+
+      {/* Session info */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-sm font-semibold text-gray-900 mb-3">Session Info</h2>
+        <div className="space-y-0 text-sm divide-y divide-gray-50">
+          {[
+            { label: 'Role',      value: role,     mono: false },
+            { label: 'User ID',   value: userId,   mono: true  },
+            { label: 'Tenant ID', value: tenantId, mono: true  },
+          ].map(row => (
+            <div key={row.label} className="flex justify-between py-2">
+              <span className="text-gray-500">{row.label}</span>
+              <span className={`${row.mono ? 'font-mono text-xs' : 'font-medium'} text-gray-700`}>
+                {row.value ?? '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'ADMIN';
@@ -395,28 +499,7 @@ export default function SettingsPage() {
 
       {/* Security */}
       {tab === 'security' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900 mb-3">Session Info</h2>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between py-2 border-b border-gray-50">
-                <span className="text-gray-500">Role</span>
-                <span className="font-medium text-gray-800">{user?.role}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-gray-50">
-                <span className="text-gray-500">User ID</span>
-                <span className="font-mono text-xs text-gray-600">{user?.id}</span>
-              </div>
-              <div className="flex justify-between py-2">
-                <span className="text-gray-500">Tenant ID</span>
-                <span className="font-mono text-xs text-gray-600">{user?.tenantId}</span>
-              </div>
-            </div>
-          </div>
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-700">
-            Password changes must be done by an Admin via the Staff & Passwords panel.
-          </div>
-        </div>
+        <SecurityTab userId={user?.id} tenantId={user?.tenantId} role={user?.role} />
       )}
     </div>
   );
