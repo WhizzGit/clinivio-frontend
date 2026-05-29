@@ -66,7 +66,9 @@ export default function LoginPage() {
       if (values.slug?.trim()) payload.slug = values.slug.trim();
 
       const { data } = await iamApi.post<AuthResponse>("/auth/login", payload);
-      setAuth(data.user, data.accessToken, data.refreshToken);
+      // Store the slug so the API client can send X-Tenant-Slug on every
+      // subsequent request (tenant context for the middleware).
+      setAuth(data.user, data.accessToken, data.refreshToken, values.slug?.trim() || undefined);
       router.replace(ROLE_DEST[data.user.role] ?? "/dashboard");
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };

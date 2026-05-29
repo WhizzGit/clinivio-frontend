@@ -1,16 +1,19 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from "axios";
 
-// ─── Token helpers (client-side only) ────────────────────────────────────────
+// ─── LocalStorage helpers (client-side only) ─────────────────────────────────
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
+function getAuthState(): { token: string | null; tenantSlug: string | null } {
+  if (typeof window === "undefined") return { token: null, tenantSlug: null };
   try {
     const raw = localStorage.getItem("clinivio-auth");
-    if (!raw) return null;
+    if (!raw) return { token: null, tenantSlug: null };
     const parsed = JSON.parse(raw);
-    return parsed?.state?.token ?? null;
+    return {
+      token:      parsed?.state?.token      ?? null,
+      tenantSlug: parsed?.state?.tenantSlug ?? null,
+    };
   } catch {
-    return null;
+    return { token: null, tenantSlug: null };
   }
 }
 
@@ -26,18 +29,25 @@ function createApiInstance(baseURL: string): AxiosInstance {
   const instance = axios.create({
     baseURL,
     timeout: 15_000,
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
   });
 
-  // Request interceptor — attach Bearer token
+  // Request interceptor — attach Bearer token + X-Tenant-Slug
   instance.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-      const token = getToken();
+      const { token, tenantSlug } = getAuthState();
+
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+
+      // Send the tenant slug on every request so TenantContextMiddleware can
+      // set the correct DataSource even when no subdomain is present
+      // (e.g. direct Render/Vercel URLs).
+      if (tenantSlug && config.headers) {
+        config.headers["X-Tenant-Slug"] = tenantSlug;
+      }
+
       return config;
     },
     (error) => Promise.reject(error)
@@ -48,7 +58,6 @@ function createApiInstance(baseURL: string): AxiosInstance {
     (response) => response,
     async (error: AxiosError) => {
       if (error.response?.status === 401) {
-        // Clear auth state and redirect
         if (typeof window !== "undefined") {
           localStorage.removeItem("clinivio-auth");
           redirectToLogin();
@@ -62,17 +71,14 @@ function createApiInstance(baseURL: string): AxiosInstance {
 }
 
 // ─── Single unified API base URL ──────────────────────────────────────────────
-// All former microservices are now served from one endpoint.
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "https://clinivio-backend.onrender.com";
 
-// Export four named instances so existing imports keep working.
-// They all point to the same backend — no code changes needed in pages.
+// All four instances point to the same backend.
 export const iamApi         = createApiInstance(API_BASE);
 export const patientApi     = createApiInstance(API_BASE);
 export const appointmentApi = createApiInstance(API_BASE);
 export const billingApi     = createApiInstance(API_BASE);
 
-// Default export (backwards compat)
 export default iamApi;
