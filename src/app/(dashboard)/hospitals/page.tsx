@@ -68,6 +68,119 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 // ── Credentials modal ──────────────────────────────────────────────────────────
 
+function buildCredentialHtml(creds: {
+  adminName: string;
+  email: string;
+  password: string;
+  tenantSlug?: string;
+  tenantId: string;
+}, title: string): string {
+  const date = new Date().toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+  const loginUrl = 'https://clinivio-frontend.vercel.app/login';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clinivio Credentials — ${title}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;display:flex;justify-content:center;align-items:flex-start;min-height:100vh;padding:40px 20px}
+  .card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.12);width:100%;max-width:480px;overflow:hidden}
+  .header{background:linear-gradient(135deg,#4f46e5,#2563eb);padding:24px 28px;color:#fff}
+  .logo{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .logo-icon{width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+  .logo-text{font-size:18px;font-weight:800;letter-spacing:-.5px}
+  .logo-sub{font-size:11px;opacity:.7;margin-top:1px}
+  .title{font-size:20px;font-weight:700;margin-bottom:4px}
+  .subtitle{font-size:12px;opacity:.75}
+  .body{padding:24px 28px}
+  .warning{background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:10px 14px;font-size:12px;color:#92400e;margin-bottom:20px;display:flex;gap:8px;align-items:flex-start}
+  .warning-icon{font-size:14px;flex-shrink:0;margin-top:1px}
+  .slug-box{background:#eff6ff;border:2px solid #93c5fd;border-radius:10px;padding:14px 16px;margin-bottom:16px}
+  .slug-label{font-size:11px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+  .slug-value{font-family:'Courier New',monospace;font-size:22px;font-weight:800;color:#1d4ed8;letter-spacing:1px}
+  .slug-note{font-size:11px;color:#60a5fa;margin-top:6px}
+  .field{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9}
+  .field:last-of-type{border-bottom:none}
+  .field-label{font-size:12px;color:#64748b;font-weight:500}
+  .field-value{font-size:13px;font-weight:600;color:#1e293b;text-align:right;word-break:break-all;max-width:60%}
+  .field-value.mono{font-family:'Courier New',monospace;font-size:12px}
+  .login-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;margin-top:20px}
+  .login-title{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+  .login-step{font-size:12px;color:#64748b;margin-bottom:4px;display:flex;gap:6px}
+  .step-num{background:#2563eb;color:#fff;border-radius:50%;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px}
+  .url{font-family:'Courier New',monospace;font-size:11px;color:#2563eb;word-break:break-all}
+  .footer{padding:14px 28px;border-top:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center}
+  .footer-note{font-size:11px;color:#94a3b8}
+  .confidential{font-size:11px;font-weight:700;color:#ef4444;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:3px 8px}
+  @media print{body{background:#fff;padding:0}.card{box-shadow:none;border-radius:0;max-width:100%}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">⚕️</div>
+      <div>
+        <div class="logo-text">Clinivio</div>
+        <div class="logo-sub">by Whizzon.ai · Hospital Management</div>
+      </div>
+    </div>
+    <div class="title">${title}</div>
+    <div class="subtitle">Generated on ${date}</div>
+  </div>
+  <div class="body">
+    <div class="warning">
+      <span class="warning-icon">⚠️</span>
+      <span>This document contains sensitive login credentials. Store it securely and do not share via unencrypted channels. Delete after the admin has set a new password.</span>
+    </div>
+
+    ${creds.tenantSlug ? `
+    <div class="slug-box">
+      <div class="slug-label">Hospital ID (required at login)</div>
+      <div class="slug-value">${creds.tenantSlug}</div>
+      <div class="slug-note">Enter this in the "Hospital ID" field on the login page</div>
+    </div>` : ''}
+
+    <div class="field">
+      <span class="field-label">Admin Name</span>
+      <span class="field-value">${creds.adminName}</span>
+    </div>
+    <div class="field">
+      <span class="field-label">Login Email</span>
+      <span class="field-value mono">${creds.email}</span>
+    </div>
+    <div class="field">
+      <span class="field-label">Password</span>
+      <span class="field-value mono">${creds.password}</span>
+    </div>
+    <div class="field">
+      <span class="field-label">Tenant ID</span>
+      <span class="field-value mono" style="font-size:10px">${creds.tenantId}</span>
+    </div>
+
+    <div class="login-box">
+      <div class="login-title">How to log in</div>
+      <div class="login-step"><span class="step-num">1</span><span>Open the Clinivio portal: <span class="url">${loginUrl}</span></span></div>
+      ${creds.tenantSlug ? `<div class="login-step"><span class="step-num">2</span><span>Enter Hospital ID: <strong>${creds.tenantSlug}</strong></span></div>` : ''}
+      <div class="login-step"><span class="step-num">${creds.tenantSlug ? '3' : '2'}</span><span>Enter email and password above</span></div>
+      <div class="login-step"><span class="step-num">${creds.tenantSlug ? '4' : '3'}</span><span>Change password immediately via <strong>Settings → Security</strong></span></div>
+    </div>
+  </div>
+  <div class="footer">
+    <span class="footer-note">Clinivio · Powered by Whizzon.ai</span>
+    <span class="confidential">CONFIDENTIAL</span>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
 function CredentialsModal({ creds, title, onClose }: {
   creds: {
     email: string;
@@ -81,6 +194,21 @@ function CredentialsModal({ creds, title, onClose }: {
   onClose: () => void;
 }) {
   const password = creds.temporaryPassword ?? creds.password ?? '';
+
+  function downloadCredentials() {
+    const html = buildCredentialHtml(
+      { ...creds, password },
+      title,
+    );
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `clinivio-credentials-${creds.tenantSlug ?? creds.tenantId.slice(0, 8)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
@@ -120,7 +248,17 @@ function CredentialsModal({ creds, title, onClose }: {
           <CredentialBox label="Login Email"  value={creds.email}     mono />
           <CredentialBox label="Password"     value={password}        mono />
         </div>
-        <div className="px-6 pb-5">
+        <div className="px-6 pb-5 space-y-2">
+          {/* Download button */}
+          <button
+            onClick={downloadCredentials}
+            className="w-full py-2 border border-gray-200 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 flex items-center justify-center gap-2">
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download Credentials File
+          </button>
           <button onClick={onClose}
             className="w-full py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700">
             Done — I&apos;ve saved these credentials
