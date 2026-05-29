@@ -6,14 +6,48 @@ import { iamApi } from '@/lib/api';
 type Tab = 'profile' | 'hospital' | 'security';
 
 
+// ── Password field — defined at module level so React never treats it as a
+//    new component type on re-render (avoids focus-loss after each keystroke)
+const INP_CLS = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
+
+function PasswordField({
+  label, value, show,
+  onChange, onToggleShow,
+}: {
+  label: string;
+  value: string;
+  show: boolean;
+  onChange: (v: string) => void;
+  onToggleShow: () => void;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <div className="relative">
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          required
+          className={INP_CLS + ' pr-14'}
+        />
+        <button type="button" tabIndex={-1}
+          onClick={onToggleShow}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600">
+          {show ? 'Hide' : 'Show'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Security / change-password tab ────────────────────────────────────────────
 
 function SecurityTab({ userId, tenantId, role }: { userId?: string; tenantId?: string; role?: string }) {
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
-  const [form, setForm]   = useState({ current: '', next: '', confirm: '' });
-  const [show, setShow]   = useState({ current: false, next: false, confirm: false });
+  const [form, setForm]     = useState({ current: '', next: '', confirm: '' });
+  const [show, setShow]     = useState({ current: false, next: false, confirm: false });
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg]     = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [msg, setMsg]       = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,28 +70,6 @@ function SecurityTab({ userId, tenantId, role }: { userId?: string; tenantId?: s
     }
   }
 
-  function PasswordInput({ field, label }: { field: 'current' | 'next' | 'confirm'; label: string }) {
-    return (
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-        <div className="relative">
-          <input
-            type={show[field] ? 'text' : 'password'}
-            value={form[field]}
-            onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-            required
-            className={inp + ' pr-10'}
-          />
-          <button type="button" tabIndex={-1}
-            onClick={() => setShow(s => ({ ...s, [field]: !s[field] }))}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
-            {show[field] ? 'Hide' : 'Show'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5">
       {/* Change password */}
@@ -76,9 +88,15 @@ function SecurityTab({ userId, tenantId, role }: { userId?: string; tenantId?: s
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <PasswordInput field="current" label="Current Password" />
-          <PasswordInput field="next"    label="New Password (min 8 chars)" />
-          <PasswordInput field="confirm" label="Confirm New Password" />
+          <PasswordField label="Current Password" value={form.current} show={show.current}
+            onChange={v => setForm(f => ({ ...f, current: v }))}
+            onToggleShow={() => setShow(s => ({ ...s, current: !s.current }))} />
+          <PasswordField label="New Password (min 8 chars)" value={form.next} show={show.next}
+            onChange={v => setForm(f => ({ ...f, next: v }))}
+            onToggleShow={() => setShow(s => ({ ...s, next: !s.next }))} />
+          <PasswordField label="Confirm New Password" value={form.confirm} show={show.confirm}
+            onChange={v => setForm(f => ({ ...f, confirm: v }))}
+            onToggleShow={() => setShow(s => ({ ...s, confirm: !s.confirm }))} />
           <button type="submit" disabled={saving}
             className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
             {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
