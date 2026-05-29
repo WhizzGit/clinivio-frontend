@@ -44,7 +44,9 @@ function createApiInstance(baseURL: string): AxiosInstance {
       // Send the tenant slug on every request so TenantContextMiddleware can
       // set the correct DataSource even when no subdomain is present
       // (e.g. direct Render/Vercel URLs).
-      if (tenantSlug && config.headers) {
+      // Skip auth endpoints — login uses slug in the request body, not header.
+      const isAuthEndpoint = config.url?.startsWith("/auth/");
+      if (tenantSlug && config.headers && !isAuthEndpoint) {
         config.headers["X-Tenant-Slug"] = tenantSlug;
       }
 
