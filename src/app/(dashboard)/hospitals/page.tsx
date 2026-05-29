@@ -166,7 +166,13 @@ function OnboardModal({ onClose, onSuccess }: {
     if (form.adminPassword.length < 8) { setError('Password must be at least 8 characters'); return; }
     setSaving(true); setError(null);
     try {
-      const res = await iamApi.post('/tenants', form);
+      // NestJS @IsOptional() only skips validation for null/undefined — NOT for
+      // empty strings. Strip blank values so optional regex validators (slug,
+      // phone, etc.) are not triggered by fields the user left empty.
+      const payload = Object.fromEntries(
+        Object.entries(form).filter(([, v]) => v !== ''),
+      );
+      const res = await iamApi.post('/tenants', payload);
       onSuccess(res.data.credentials);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string | string[] } } };
