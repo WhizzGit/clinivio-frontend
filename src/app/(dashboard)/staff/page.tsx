@@ -352,152 +352,166 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
   );
 }
 
-// ─── Staff Card ───────────────────────────────────────────────────────────────
-function StaffCard({ user, onEdit, onSetPassword }: {
+// ─── Staff Row ────────────────────────────────────────────────────────────────
+function StaffRow({ user, selected, onClick }: {
+  user: StaffUser;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const meta     = ROLE_META[user.role] ?? ROLE_META.ALL;
+  const sp       = user.staffProfile;
+  const dp       = user.doctorProfile;
+  const isDoctor = user.role === 'DOCTOR';
+  const dept     = isDoctor ? dp?.department : sp?.department;
+  const keyDetail = isDoctor
+    ? (dp?.specialty ?? dp?.qualification ?? '—')
+    : (sp?.specialization ?? sp?.qualification ?? sp?.shift
+        ? (sp?.shift ? sp.shift.charAt(0) + sp.shift.slice(1).toLowerCase() + ' shift' : '') || sp?.specialization || '—'
+        : '—');
+  const regNo = isDoctor ? dp?.registrationNo : sp?.registrationNo;
+  const emp   = !isDoctor ? sp?.employeeId : null;
+
+  return (
+    <tr
+      onClick={onClick}
+      className={`border-b border-gray-50 cursor-pointer transition-colors text-sm
+        ${selected ? 'bg-blue-50 border-l-2 border-l-blue-500' : 'hover:bg-gray-50'}`}
+    >
+      {/* Staff */}
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-full ${meta.bg} flex items-center justify-center ${meta.color} font-bold text-xs flex-shrink-0`}>
+            {user.firstName[0]}{user.lastName[0]}
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium text-gray-900 truncate">{user.firstName} {user.lastName}</p>
+            <p className="text-xs text-gray-400 truncate">{user.email}</p>
+          </div>
+        </div>
+      </td>
+      {/* Role */}
+      <td className="px-4 py-3 whitespace-nowrap">
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-medium ${meta.bg} ${meta.color}`}>
+          {meta.emoji} {meta.label}
+        </span>
+      </td>
+      {/* Department */}
+      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+        {dept ? `${dept.icon ?? '🏥'} ${dept.name}` : <span className="text-gray-300">—</span>}
+      </td>
+      {/* Key detail */}
+      <td className="px-4 py-3 text-xs text-gray-500 max-w-[140px] truncate">
+        {keyDetail || <span className="text-gray-300">—</span>}
+      </td>
+      {/* ID */}
+      <td className="px-4 py-3 text-xs font-mono text-gray-400 whitespace-nowrap">
+        {regNo ?? emp ?? <span className="text-gray-300">—</span>}
+      </td>
+      {/* Status */}
+      <td className="px-4 py-3">
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${user.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+          {user.isActive ? 'Active' : 'Inactive'}
+        </span>
+      </td>
+      {/* Chevron */}
+      <td className="px-3 py-3 text-gray-300 text-xs">
+        {selected ? '▶' : '›'}
+      </td>
+    </tr>
+  );
+}
+
+// ─── Detail Pane ──────────────────────────────────────────────────────────────
+function DetailPane({ user, onEdit, onSetPassword, onClose }: {
   user: StaffUser;
   onEdit: () => void;
   onSetPassword: () => void;
+  onClose: () => void;
 }) {
-  const meta = ROLE_META[user.role] ?? ROLE_META.ALL;
-  const sp   = user.staffProfile;
-  const dp   = user.doctorProfile;
+  const meta     = ROLE_META[user.role] ?? ROLE_META.ALL;
+  const sp       = user.staffProfile;
+  const dp       = user.doctorProfile;
   const isDoctor = user.role === 'DOCTOR';
 
-  return (
-    <div className={`bg-white rounded-xl border border-gray-200 p-4 transition-shadow hover:shadow-md ${!user.isActive ? 'opacity-60' : ''}`}>
-      {/* Header */}
-      <div className="flex items-start gap-3 mb-3">
-        <div className={`w-11 h-11 rounded-full ${meta.bg} flex items-center justify-center ${meta.color} font-bold text-base flex-shrink-0`}>
-          {user.firstName[0]}{user.lastName[0]}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 text-sm truncate">{user.firstName} {user.lastName}</p>
-          <p className="text-xs text-gray-500 truncate">{user.email}</p>
-          <div className="flex items-center gap-1.5 mt-1">
-            <span className={`inline-flex px-2 py-0.5 text-xs rounded-full font-medium ${meta.bg} ${meta.color}`}>
-              {meta.emoji} {meta.label}
-            </span>
-            {!user.isActive && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inactive</span>}
-          </div>
+  function DetailRow({ icon, label, value }: { icon: string; label: string; value?: string | number | null }) {
+    if (!value && value !== 0) return null;
+    return (
+      <div className="flex items-start gap-2.5 py-2 border-b border-gray-50 last:border-0">
+        <span className="text-base leading-none mt-0.5 flex-shrink-0">{icon}</span>
+        <div className="min-w-0">
+          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+          <p className="text-sm text-gray-800 font-medium break-words">{value}</p>
         </div>
       </div>
+    );
+  }
 
-      {/* Doctor profile details */}
-      {isDoctor && dp && (
-        <div className="space-y-1 text-xs text-gray-500 mb-3">
-          {dp.registrationNo && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">📋</span>
-              <span className="font-mono">{dp.registrationNo}</span>
-            </div>
-          )}
-          {dp.specialty && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">🏷</span>
-              <span>{dp.specialty}</span>
-            </div>
-          )}
-          {dp.qualification && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">🎓</span>
-              <span>{dp.qualification}</span>
-            </div>
-          )}
-          {dp.department && (
-            <div className="flex items-center gap-1.5">
-              <span>{dp.department.icon || '🏥'}</span>
-              <span>{dp.department.name}</span>
-            </div>
-          )}
-          {dp.experienceYears != null && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">⏱</span>
-              <span>{dp.experienceYears} yrs experience</span>
-            </div>
-          )}
-          {dp.consultationFee != null && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">💰</span>
-              <span>₹{dp.consultationFee} / visit</span>
-            </div>
-          )}
-          {user.phone && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">📱</span>
-              <span>{user.phone}</span>
-            </div>
-          )}
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-2 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className={`w-12 h-12 rounded-full ${meta.bg} flex items-center justify-center ${meta.color} font-bold text-lg flex-shrink-0`}>
+            {user.firstName[0]}{user.lastName[0]}
+          </div>
+          <div>
+            <p className="font-semibold text-gray-900">{user.firstName} {user.lastName}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{user.email}</p>
+            <span className={`inline-flex items-center gap-1 mt-1 px-2 py-0.5 text-xs rounded-full font-medium ${meta.bg} ${meta.color}`}>
+              {meta.emoji} {meta.label}
+            </span>
+          </div>
         </div>
-      )}
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none flex-shrink-0 mt-1">&times;</button>
+      </div>
 
-      {/* Non-doctor staff profile details */}
-      {!isDoctor && sp && (
-        <div className="space-y-1 text-xs text-gray-500 mb-3">
-          {sp.registrationNo && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">📋</span>
-              <span className="font-mono">{sp.registrationNo}</span>
-            </div>
-          )}
-          {sp.qualification && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">🎓</span>
-              <span>{sp.qualification}</span>
-            </div>
-          )}
-          {sp.specialization && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">🏷</span>
-              <span>{sp.specialization}</span>
-            </div>
-          )}
-          {sp.department && (
-            <div className="flex items-center gap-1.5">
-              <span>{sp.department.icon || '🏥'}</span>
-              <span>{sp.department.name}</span>
-            </div>
-          )}
-          {sp.shift && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">🕐</span>
-              <span>{sp.shift.charAt(0) + sp.shift.slice(1).toLowerCase()} shift</span>
-            </div>
-          )}
-          {sp.experienceYears != null && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">⏱</span>
-              <span>{sp.experienceYears} yrs experience</span>
-            </div>
-          )}
-          {sp.joiningDate && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">📅</span>
-              <span>Joined {new Date(sp.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-            </div>
-          )}
-          {user.phone && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">📱</span>
-              <span>{user.phone}</span>
-            </div>
-          )}
-          {sp.employeeId && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-400">🪪</span>
-              <span className="font-mono">{sp.employeeId}</span>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Details */}
+      <div className="flex-1 overflow-y-auto px-5 py-3">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contact</p>
+        <DetailRow icon="📧" label="Email"  value={user.email} />
+        <DetailRow icon="📱" label="Phone"  value={user.phone} />
+
+        {(isDoctor ? dp : sp) && (
+          <>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-2">Professional</p>
+            {isDoctor ? (
+              <>
+                <DetailRow icon="📋" label="Registration No."  value={dp?.registrationNo} />
+                <DetailRow icon="🎓" label="Qualification"     value={dp?.qualification} />
+                <DetailRow icon="🏷" label="Specialty"         value={dp?.specialty} />
+                <DetailRow icon="⏱" label="Experience"        value={dp?.experienceYears != null ? `${dp.experienceYears} years` : null} />
+                <DetailRow icon="💰" label="Consultation Fee"  value={dp?.consultationFee != null ? `₹${dp.consultationFee} / visit` : null} />
+                <DetailRow icon="🏥" label="Department"        value={dp?.department ? `${dp.department.icon ?? '🏥'} ${dp.department.name}` : null} />
+                <DetailRow icon="✅" label="Accepting Patients" value={dp?.isAcceptingPatients ? 'Yes' : dp?.isAcceptingPatients === false ? 'No' : null} />
+              </>
+            ) : (
+              <>
+                <DetailRow icon="🪪" label="Employee ID"       value={sp?.employeeId} />
+                <DetailRow icon="📋" label={meta.regLabel}     value={sp?.registrationNo} />
+                <DetailRow icon="🎓" label="Qualification"     value={sp?.qualification} />
+                <DetailRow icon="🏷" label={meta.specLabel || 'Specialization'} value={sp?.specialization} />
+                <DetailRow icon="🏥" label="Department"        value={sp?.department ? `${sp.department.icon ?? '🏥'} ${sp.department.name}` : null} />
+                <DetailRow icon="🕐" label="Shift"             value={sp?.shift ? sp.shift.charAt(0) + sp.shift.slice(1).toLowerCase() : null} />
+                <DetailRow icon="⏱" label="Experience"        value={sp?.experienceYears != null ? `${sp.experienceYears} years` : null} />
+                <DetailRow icon="📅" label="Joining Date"      value={sp?.joiningDate ? new Date(sp.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null} />
+              </>
+            )}
+          </>
+        )}
+
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-2">Account</p>
+        <DetailRow icon="🔒" label="Status" value={user.isActive ? 'Active' : 'Inactive'} />
+        <DetailRow icon="📆" label="Joined Platform" value={new Date(user.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} />
+      </div>
 
       {/* Actions */}
-      <div className="flex gap-2 pt-2 border-t border-gray-100">
+      <div className="px-5 py-4 border-t border-gray-100 flex gap-2 flex-shrink-0">
         <button onClick={onEdit}
-          className="flex-1 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
-          {isDoctor ? 'Basic Info' : 'Edit Details'}
+          className="flex-1 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
+          Edit Details
         </button>
         <button onClick={onSetPassword}
-          className="flex-1 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors">
+          className="flex-1 py-2 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors">
           Set Password
         </button>
       </div>
@@ -513,13 +527,14 @@ type ModalState =
   | null;
 
 export default function StaffPage() {
-  const [users, setUsers]           = useState<StaffUser[]>([]);
+  const [users, setUsers]             = useState<StaffUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [modal, setModal]           = useState<ModalState>(null);
-  const [toast, setToast]           = useState<string | null>(null);
-  const [activeTab, setActiveTab]   = useState('ALL');
-  const [search, setSearch]         = useState('');
+  const [loading, setLoading]         = useState(true);
+  const [modal, setModal]             = useState<ModalState>(null);
+  const [toast, setToast]             = useState<string | null>(null);
+  const [activeTab, setActiveTab]     = useState('ALL');
+  const [search, setSearch]           = useState('');
+  const [selectedUser, setSelectedUser] = useState<StaffUser | null>(null);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -681,40 +696,72 @@ export default function StaffPage() {
         />
       </div>
 
-      {/* Content */}
-      {loading ? (
-        <div className="flex items-center justify-center h-48 text-gray-400">Loading…</div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 gap-3 text-gray-400">
-          <p className="text-4xl">{activeTab === 'ALL' ? '👥' : ROLE_META[activeTab]?.emoji}</p>
-          <p className="font-medium">
-            {search
-              ? 'No staff match your search'
-              : activeTab === 'ALL'
-                ? 'No staff added yet'
-                : activeTab === 'DOCTOR'
-                  ? 'No doctors enrolled yet — use the Doctors page to add doctors'
-                  : `No ${ROLE_META[activeTab]?.plural} added yet`}
-          </p>
-          {!search && activeRoleForAdd && (
-            <button onClick={() => setModal({ type: 'add', role: activeRoleForAdd })}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Add First {ROLE_META[activeRoleForAdd]?.label}
-            </button>
+      {/* Content — table + side pane */}
+      <div className="flex gap-0 min-h-0">
+        {/* Table */}
+        <div className={`flex-1 min-w-0 transition-all duration-200 ${selectedUser ? 'mr-[340px]' : ''}`}>
+          {loading ? (
+            <div className="flex items-center justify-center h-48 text-gray-400">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-3 text-gray-400">
+              <p className="text-4xl">{activeTab === 'ALL' ? '👥' : ROLE_META[activeTab]?.emoji}</p>
+              <p className="font-medium">
+                {search
+                  ? 'No staff match your search'
+                  : activeTab === 'ALL'
+                    ? 'No staff added yet'
+                    : activeTab === 'DOCTOR'
+                      ? 'No doctors enrolled yet — use the Doctors page'
+                      : `No ${ROLE_META[activeTab]?.plural} added yet`}
+              </p>
+              {!search && activeRoleForAdd && (
+                <button onClick={() => setModal({ type: 'add', role: activeRoleForAdd })}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                  Add First {ROLE_META[activeRoleForAdd]?.label}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100 text-xs font-medium text-gray-500">
+                    <th className="px-4 py-3 text-left">Staff</th>
+                    <th className="px-4 py-3 text-left">Role</th>
+                    <th className="px-4 py-3 text-left">Department</th>
+                    <th className="px-4 py-3 text-left">Specialization / Shift</th>
+                    <th className="px-4 py-3 text-left">ID / Reg. No.</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-3 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(u => (
+                    <StaffRow
+                      key={u.id}
+                      user={u}
+                      selected={selectedUser?.id === u.id}
+                      onClick={() => setSelectedUser(prev => prev?.id === u.id ? null : u)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-          {filtered.map(u => (
-            <StaffCard
-              key={u.id}
-              user={u}
-              onEdit={() => setModal({ type: 'edit', user: u })}
-              onSetPassword={() => setModal({ type: 'password', user: u })}
+
+        {/* Detail pane — fixed right panel */}
+        {selectedUser && (
+          <div className="fixed top-0 right-0 h-full w-[340px] bg-white border-l border-gray-200 shadow-xl z-30 flex flex-col">
+            <DetailPane
+              user={selectedUser}
+              onEdit={() => setModal({ type: 'edit', user: selectedUser })}
+              onSetPassword={() => setModal({ type: 'password', user: selectedUser })}
+              onClose={() => setSelectedUser(null)}
             />
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
