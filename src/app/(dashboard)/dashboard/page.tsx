@@ -97,13 +97,15 @@ function AdminAnalytics() {
         ].map(card => (
           <div key={card.label}
             onClick={card.onClick}
-            className={`rounded-xl border p-4 ${card.bg} ${card.border} ${card.onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}>
-            <div className="flex items-start justify-between mb-2">
-              <span className="text-2xl">{card.icon}</span>
+            className={`rounded-xl border px-3 py-2.5 ${card.bg} ${card.border} ${card.onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}>
+            {/* Row 1: icon left, count right */}
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xl leading-none">{card.icon}</span>
+              <p className={`text-xl font-bold leading-none ${card.color}`}>{card.value}</p>
             </div>
-            <p className={`text-2xl font-bold ${card.color}`}>{card.value}</p>
-            <p className="text-sm text-gray-600 font-medium mt-0.5">{card.label}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{card.sub}</p>
+            {/* Row 2: label + sub */}
+            <p className="text-xs font-semibold text-gray-700 leading-snug">{card.label}</p>
+            <p className="text-xs text-gray-500 leading-snug">{card.sub}</p>
           </div>
         ))}
       </div>
