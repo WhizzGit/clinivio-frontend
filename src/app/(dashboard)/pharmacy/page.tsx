@@ -282,7 +282,7 @@ function PharmacyAnalyticsTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    appointmentApi.get('/stats/pharmacy/analytics')
+    appointmentApi.get('/stats/pharmacy')
       .then(r => setData(r.data))
       .catch(() => {})
       .finally(() => setLoading(false));

@@ -588,9 +588,9 @@ export default function LabPage() {
       setLoading(true);
       const [ordersRes, statsRes, testsRes, analyticsRes] = await Promise.all([
         appointmentApi.get(`/lab/orders${activeTab !== 'ALL' ? `?status=${activeTab}` : ''}`),
-        appointmentApi.get('/lab/stats'),
+        appointmentApi.get('/lab/analytics'),
         appointmentApi.get('/lab/tests?all=true'),
-        canManageCatalog ? appointmentApi.get('/lab/analytics') : Promise.resolve({ data: null }),
+        Promise.resolve({ data: null }), // analytics already fetched above
       ]);
       setOrders(ordersRes.data?.data || ordersRes.data || []);
       setStats(statsRes.data);
