@@ -7,10 +7,10 @@ interface PharmacyOrder {
   id: string;
   status: 'PENDING' | 'DISPENSING' | 'DISPENSED' | 'RETURNED';
   createdAt: string;
+  patient: { firstName: string; lastName: string; uhid: string };
   appointment: {
     id: string;
     tokenNumber: number;
-    patient: { firstName: string; lastName: string; uhid: string };
     doctor: { firstName: string; lastName: string };
     department?: { name: string; icon: string };
     consultation?: {
@@ -603,6 +603,7 @@ export default function PharmacyPage() {
                 {filtered.map(order => {
                   const cfg = STATUS_CONFIG[order.status];
                   const apt = order.appointment;
+                  const pat = order.patient;
                   const items = apt.consultation?.prescriptions?.[0]?.items || [];
                   return (
                     <button
@@ -621,9 +622,9 @@ export default function PharmacyPage() {
                           </div>
                           <div>
                             <p className="font-semibold text-gray-900 text-sm">
-                              {apt.patient.firstName} {apt.patient.lastName}
+                              {pat.firstName} {pat.lastName}
                             </p>
-                            <p className="text-xs text-gray-400">{apt.patient.uhid}</p>
+                            <p className="text-xs text-gray-400">{pat.uhid}</p>
                             <p className="text-xs text-gray-500 mt-0.5">
                               Dr. {apt.doctor.firstName} {apt.doctor.lastName}
                               {apt.department && ` · ${apt.department.icon} ${apt.department.name}`}
@@ -667,9 +668,9 @@ export default function PharmacyPage() {
                 <div className="space-y-4">
                   <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100">
                     <p className="font-medium text-gray-900 text-sm">
-                      {selected.appointment.patient.firstName} {selected.appointment.patient.lastName}
+                      {selected.patient.firstName} {selected.patient.lastName}
                     </p>
-                    <p className="text-xs text-gray-500">{selected.appointment.patient.uhid}</p>
+                    <p className="text-xs text-gray-500">{selected.patient.uhid}</p>
                     <p className="text-xs text-gray-500 mt-1">
                       Token #{selected.appointment.tokenNumber} · Dr. {selected.appointment.doctor.firstName} {selected.appointment.doctor.lastName}
                     </p>
