@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { appointmentApi } from '@/lib/api';
+import { useAuthStore } from '@/store/auth.store';
 
 interface QueueEntry {
   id: string;
@@ -39,6 +40,8 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function DoctorQueuePage() {
   const router = useRouter();
+  const { user } = useAuthStore();
+  const isNurse = user?.role === 'NURSE';
   const [queue, setQueue] = useState<QueueStatus | null>(null);
   const [appointments, setAppointments] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,8 +75,11 @@ export default function DoctorQueuePage() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
 
+  // ── Doctor actions ──────────────────────────────────────────────────────────
+
+  /** Check in (if needed) then start consultation and navigate */
   async function startConsultation(appt: QueueEntry) {
-    setActionLoading(appt.id);
+    setActionLoading(appt.id + '-start');
     try {
       if (appt.status === 'CONFIRMED') {
         await appointmentApi.post(`/appointments/${appt.id}/check-in`);
@@ -83,23 +89,39 @@ export default function DoctorQueuePage() {
       }
       router.push(`/consultation/${appt.id}`);
     } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Failed to start consultation';
-      showToast(msg, 'error');
+      showToast(err?.response?.data?.message || 'Failed to start', 'error');
       setActionLoading(null);
     }
   }
 
   async function checkIn(appt: QueueEntry) {
-    setActionLoading(appt.id);
+    setActionLoading(appt.id + '-checkin');
     try {
       await appointmentApi.post(`/appointments/${appt.id}/check-in`);
       showToast(`${appt.patient.firstName} checked in`);
       await fetchQueue();
     } catch (err: any) {
       showToast(err?.response?.data?.message || 'Check-in failed', 'error');
-    } finally {
-      setActionLoading(null);
-    }
+    } finally { setActionLoading(null); }
+  }
+
+  /** Reverse an accidental check-in — CHECKED_IN → CONFIRMED */
+  async function undoCheckIn(appt: QueueEntry) {
+    setActionLoading(appt.id + '-undo');
+    try {
+      await appointmentApi.post(`/appointments/${appt.id}/undo-check-in`);
+      showToast(`Check-in reversed for ${appt.patient.firstName}`);
+      await fetchQueue();
+    } catch (err: any) {
+      showToast(err?.response?.data?.message || 'Could not undo check-in', 'error');
+    } finally { setActionLoading(null); }
+  }
+
+  // ── Nurse actions ────────────────────────────────────────────────────────────
+
+  /** Navigate to consultation page for vitals — does NOT change appointment status */
+  function enterVitals(appt: QueueEntry) {
+    router.push(`/consultation/${appt.id}`);
   }
 
   const age = (dob?: string) => {
@@ -256,7 +278,7 @@ export default function DoctorQueuePage() {
                   return (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.tokenNumber - b.tokenNumber;
                 })
                 .map((appt) => {
-                  const isLoading = actionLoading === appt.id;
+                  const busy = (suffix: string) => actionLoading === appt.id + suffix;
                   return (
                     <tr
                       key={appt.id}
@@ -279,50 +301,84 @@ export default function DoctorQueuePage() {
                           {STATUS_LABELS[appt.status] || appt.status}
                         </span>
                       </td>
+
+                      {/* ── Action buttons — role-aware ─────────────────── */}
                       <td className="px-4 py-3">
-                        {appt.status === 'CONFIRMED' && (
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => checkIn(appt)}
-                              disabled={isLoading}
-                              className="px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 disabled:opacity-50 transition-colors"
-                            >
-                              {isLoading ? '…' : 'Check In'}
-                            </button>
-                            <button
-                              onClick={() => startConsultation(appt)}
-                              disabled={isLoading}
-                              className="px-2.5 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                            >
-                              {isLoading ? '…' : 'Start →'}
-                            </button>
-                          </div>
-                        )}
-                        {appt.status === 'CHECKED_IN' && (
-                          <button
-                            onClick={() => startConsultation(appt)}
-                            disabled={isLoading}
-                            className="px-3 py-1 text-xs font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
-                          >
-                            {isLoading ? '…' : 'Start Consultation →'}
-                          </button>
-                        )}
-                        {appt.status === 'IN_PROGRESS' && (
-                          <button
-                            onClick={() => router.push(`/consultation/${appt.id}`)}
-                            className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                          >
-                            Continue →
-                          </button>
-                        )}
-                        {appt.status === 'COMPLETED' && (
-                          <button
-                            onClick={() => router.push(`/consultation/${appt.id}`)}
-                            className="px-3 py-1 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                          >
-                            View
-                          </button>
-                        )}
+                        <div className="flex flex-wrap gap-1.5">
+
+                          {isNurse ? (
+                            /* ── NURSE ───────────────────────────────────── */
+                            <>
+                              {appt.status === 'CONFIRMED' && (
+                                <>
+                                  <button onClick={() => checkIn(appt)} disabled={busy('-checkin')}
+                                    className="px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 disabled:opacity-50">
+                                    {busy('-checkin') ? '…' : 'Check In'}
+                                  </button>
+                                  <button onClick={() => enterVitals(appt)}
+                                    className="px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200">
+                                    📋 Vitals
+                                  </button>
+                                </>
+                              )}
+                              {appt.status === 'CHECKED_IN' && (
+                                <>
+                                  <button onClick={() => enterVitals(appt)}
+                                    className="px-2.5 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                    📋 Vitals
+                                  </button>
+                                  <button onClick={() => undoCheckIn(appt)} disabled={busy('-undo')}
+                                    title="Reverse accidental check-in"
+                                    className="px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+                                    {busy('-undo') ? '…' : '↩ Undo'}
+                                  </button>
+                                </>
+                              )}
+                              {(appt.status === 'IN_PROGRESS' || appt.status === 'COMPLETED') && (
+                                <button onClick={() => enterVitals(appt)}
+                                  className="px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200">
+                                  📋 {appt.status === 'COMPLETED' ? 'Edit Vitals' : 'Update Vitals'}
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            /* ── DOCTOR (default) ────────────────────────── */
+                            <>
+                              {appt.status === 'CONFIRMED' && (
+                                <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
+                                  className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                                  {busy('-start') ? '…' : 'Check In + Start →'}
+                                </button>
+                              )}
+                              {appt.status === 'CHECKED_IN' && (
+                                <>
+                                  <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
+                                    className="px-3 py-1 text-xs font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50">
+                                    {busy('-start') ? '…' : 'Start →'}
+                                  </button>
+                                  <button onClick={() => undoCheckIn(appt)} disabled={busy('-undo')}
+                                    title="Reverse accidental check-in"
+                                    className="px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+                                    {busy('-undo') ? '…' : '↩ Undo'}
+                                  </button>
+                                </>
+                              )}
+                              {appt.status === 'IN_PROGRESS' && (
+                                <button onClick={() => router.push(`/consultation/${appt.id}`)}
+                                  className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700">
+                                  Continue →
+                                </button>
+                              )}
+                              {appt.status === 'COMPLETED' && (
+                                <button onClick={() => router.push(`/consultation/${appt.id}`)}
+                                  className="px-3 py-1 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                  View
+                                </button>
+                              )}
+                            </>
+                          )}
+
+                        </div>
                       </td>
                     </tr>
                   );
