@@ -1,7 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { appointmentApi } from '@/lib/api';
+import { appointmentApi, iamApi } from '@/lib/api';
+import { useAuthStore } from '@/store/auth.store';
 import { PatientHistoryDrawer } from '@/components/PatientHistoryDrawer';
+import { generateReceiptHtml, printDocument, TenantProfile } from '@/lib/print';
 
 interface ActivePatient {
   id: string;
@@ -18,15 +20,24 @@ interface ActivePatient {
 const PAYMENT_METHODS = ['CASH', 'UPI', 'CARD', 'INSURANCE', 'NEFT'];
 
 export default function BillingCounterPage() {
-  const [patients, setPatients] = useState<ActivePatient[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuthStore();
+  const [patients, setPatients]     = useState<ActivePatient[]>([]);
+  const [loading, setLoading]       = useState(true);
   const [fetchError, setFetchError] = useState(false);
-  const [selected, setSelected] = useState<ActivePatient | null>(null);
-  const [amount, setAmount] = useState('');
+  const [selected, setSelected]     = useState<ActivePatient | null>(null);
+  const [amount, setAmount]         = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [processing, setProcessing] = useState(false);
-  const [search, setSearch] = useState('');
+  const [search, setSearch]         = useState('');
   const [historyPatient, setHistoryPatient] = useState<ActivePatient['patient'] | null>(null);
+  const [tenantProfile, setTenantProfile] = useState<TenantProfile | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<{ patient: ActivePatient; amount: number; method: string } | null>(null);
+
+  useEffect(() => {
+    if (user?.tenantId) {
+      iamApi.get(`/tenants/${user.tenantId}`).then(r => setTenantProfile(r.data)).catch(() => {});
+    }
+  }, [user?.tenantId]);
 
   const fetchPending = useCallback(async () => {
     try {
@@ -54,6 +65,8 @@ export default function BillingCounterPage() {
         paymentMethod,
         amount: parseFloat(amount),
       });
+      // Store for optional receipt print
+      setLastReceipt({ patient: selected, amount: parseFloat(amount), method: paymentMethod });
       setSelected(null);
       setAmount('');
       setPaymentMethod('CASH');
@@ -63,6 +76,30 @@ export default function BillingCounterPage() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  const printReceipt = (receipt: NonNullable<typeof lastReceipt>) => {
+    const html = generateReceiptHtml({
+      tenant: tenantProfile ?? { name: 'Hospital' },
+      receiptNo: `RCP-${receipt.patient.id.slice(0, 8).toUpperCase()}`,
+      date: new Date().toISOString(),
+      patient: {
+        firstName: receipt.patient.patient.firstName,
+        lastName:  receipt.patient.patient.lastName,
+        uhid:      receipt.patient.patient.uhid,
+        phone:     receipt.patient.patient.phone,
+      },
+      doctor: {
+        firstName: receipt.patient.doctor.firstName,
+        lastName:  receipt.patient.doctor.lastName,
+      },
+      department:     receipt.patient.department?.name,
+      chiefComplaint: receipt.patient.chiefComplaint,
+      amount:         receipt.amount,
+      paymentMethod:  receipt.method,
+      tokenNumber:    receipt.patient.tokenNumber,
+    });
+    printDocument(html);
   };
 
   const filtered = patients.filter(p => {
@@ -81,6 +118,27 @@ export default function BillingCounterPage() {
       {historyPatient && (
         <PatientHistoryDrawer patient={historyPatient} onClose={() => setHistoryPatient(null)} />
       )}
+
+      {/* Receipt ready toast */}
+      {lastReceipt && (
+        <div className="fixed top-4 right-4 z-50 bg-green-600 text-white rounded-xl shadow-xl px-4 py-3 flex items-center gap-3 max-w-sm">
+          <span className="text-xl">✅</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold">Payment received — ₹{lastReceipt.amount.toLocaleString('en-IN')}</p>
+            <p className="text-xs opacity-80">{lastReceipt.patient.patient.firstName} {lastReceipt.patient.patient.lastName}</p>
+          </div>
+          <div className="flex gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => printReceipt(lastReceipt)}
+              className="px-2.5 py-1 text-xs font-semibold bg-white text-green-700 rounded-lg hover:bg-green-50 flex items-center gap-1"
+            >
+              🖨 Receipt
+            </button>
+            <button onClick={() => setLastReceipt(null)} className="text-white/70 hover:text-white text-lg leading-none px-1">×</button>
+          </div>
+        </div>
+      )}
+
       {/* Patient Queue */}
       <div className="flex-1 min-w-0">
         <div className="mb-5">

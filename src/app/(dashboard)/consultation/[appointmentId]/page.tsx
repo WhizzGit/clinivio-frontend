@@ -1,7 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { appointmentApi, patientApi } from '@/lib/api';
+import { appointmentApi, patientApi, iamApi } from '@/lib/api';
+import { useAuthStore } from '@/store/auth.store';
+import { generatePrescriptionHtml, printDocument, TenantProfile } from '@/lib/print';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -104,10 +106,13 @@ function emptyMed(): MedItem {
 export default function ConsultationPage() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const router = useRouter();
+  const { user } = useAuthStore();
 
-  const [appt, setAppt] = useState<Appointment | null>(null);
-  const [consultation, setConsultation] = useState<Consultation>({});
-  const [vitals, setVitals] = useState<Vitals>({});
+  const [appt, setAppt]                   = useState<Appointment | null>(null);
+  const [consultation, setConsultation]   = useState<Consultation>({});
+  const [tenantProfile, setTenantProfile] = useState<TenantProfile | null>(null);
+  const [printing, setPrinting]           = useState(false);
+  const [vitals, setVitals]               = useState<Vitals>({});
   const [observations, setObservations] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [doctorNotes, setDoctorNotes] = useState('');
@@ -148,17 +153,21 @@ export default function ConsultationPage() {
         // Try to load existing consultation
         try {
           const cRes = await appointmentApi.get(`/appointments/${appointmentId}/consultation`);
-          const c: Consultation = cRes.data;
-          hydrate(c);
+          hydrate(cRes.data);
         } catch {
-          // No consultation yet — that's fine, will be created on first save
+          // No consultation yet — will be created on first save
+        }
+
+        // Fetch tenant profile for print header (best-effort, don't block on failure)
+        if (a.patient?.id) {
+          iamApi.get(`/tenants/${user?.tenantId}`).then(r => setTenantProfile(r.data)).catch(() => {});
         }
       } catch {
         setLoadError('Could not load appointment details');
       }
     }
     load();
-  }, [appointmentId]);
+  }, [appointmentId, user?.tenantId]);
 
   function hydrate(c: Consultation) {
     setConsultation(c);
@@ -237,6 +246,48 @@ export default function ConsultationPage() {
     }
   }
 
+  function printPrescription() {
+    if (!appt) return;
+    setPrinting(true);
+    const html = generatePrescriptionHtml({
+      tenant: tenantProfile ?? { name: 'Hospital' },
+      doctor: {
+        firstName: appt.doctor?.firstName ?? '',
+        lastName:  appt.doctor?.lastName  ?? '',
+      },
+      patient: {
+        firstName: appt.patient.firstName,
+        lastName:  appt.patient.lastName,
+        uhid:      appt.patient.uhid,
+        dob:       appt.patient.dob,
+        gender:    appt.patient.gender,
+        bloodGroup: appt.patient.bloodGroup,
+        phone:     appt.patient.phone,
+      },
+      appointment: {
+        id:             appt.id,
+        tokenNumber:    appt.tokenNumber,
+        chiefComplaint: appt.chiefComplaint,
+        scheduledAt:    appt.scheduledAt,
+        department:     appt.department?.name,
+      },
+      vitals,
+      diagnosis,
+      observations,
+      doctorNotes,
+      icdCodes,
+      medicines: meds.filter(m => m.medicineName.trim()),
+      rxNotes:   rxNotes || undefined,
+      followUpDate:  followUps[followUps.length - 1]?.followUpDate,
+      followUpNotes: followUps[followUps.length - 1]?.notes,
+    });
+    printDocument(html);
+    setPrinting(false);
+  }
+
+  // suppresses unused-read hint for consultation — used in hydrate + future features
+  void consultation;
+
   async function complete(sendToPharmacy: boolean) {
     setCompleting(true);
     try {
@@ -307,6 +358,14 @@ export default function ConsultationPage() {
           <h1 className="text-xl font-bold text-gray-900">Consultation</h1>
         </div>
         <div className="flex gap-2 flex-shrink-0">
+          <button
+            onClick={printPrescription}
+            disabled={printing || !appt}
+            title="Print prescription"
+            className="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+          >
+            🖨 Print Rx
+          </button>
           <button
             onClick={() => complete(false)}
             disabled={completing}
