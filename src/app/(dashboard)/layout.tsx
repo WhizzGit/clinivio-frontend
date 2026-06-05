@@ -12,9 +12,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (!isAuthenticated) { router.push('/login'); return; }
-    // Redirect SUPER_ADMIN away from hospital-specific pages
     if (user?.role === 'SUPER_ADMIN' && pathname === '/dashboard') {
       router.replace('/hospitals');
+    }
+    if (user?.role === 'PHARMACIST' && pathname === '/dashboard') {
+      router.replace('/pharmacy');
     }
   }, [isAuthenticated, user, router, pathname]);
 

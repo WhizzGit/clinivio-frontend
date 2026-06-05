@@ -471,6 +471,8 @@ export default function PharmacyPage() {
       const params = filterStatus ? `?status=${filterStatus}` : '';
       const res = await appointmentApi.get(`/pharmacy/orders${params}`);
       setOrders(Array.isArray(res.data) ? res.data : (res.data?.data ?? []));
+    } catch {
+      setOrders([]);
     } finally {
       setOrdersLoading(false);
     }
@@ -490,6 +492,8 @@ export default function PharmacyPage() {
       if (lowStockOnly) params.set('lowStock', 'true');
       const res = await appointmentApi.get(`/pharmacy/inventory?${params}`);
       setInventory(Array.isArray(res.data) ? res.data : (res.data?.data ?? []));
+    } catch {
+      setInventory([]);
     } finally {
       setInvLoading(false);
     }

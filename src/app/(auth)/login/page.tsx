@@ -32,6 +32,7 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 const ROLE_DEST: Record<string, string> = {
   SUPER_ADMIN:    "/hospitals",
   LAB_TECHNICIAN: "/lab",
+  PHARMACIST:     "/pharmacy",
 };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
