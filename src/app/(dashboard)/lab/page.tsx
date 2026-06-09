@@ -439,13 +439,13 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
         {canEdit && (
           <div className="p-4 border-t border-gray-100 space-y-2">
             {order.status === 'PENDING' && (
-              <button onClick={() => action('collect-sample')} disabled={actioning}
+              <button onClick={() => action('sample-collected')} disabled={actioning}
                 className="w-full py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-60">
                 {actioning ? 'Processing…' : 'Mark Sample Collected'}
               </button>
             )}
             {order.status === 'SAMPLE_COLLECTED' && (
-              <button onClick={() => action('start-processing')} disabled={actioning}
+              <button onClick={() => action('processing')} disabled={actioning}
                 className="w-full py-2 text-sm bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-60">
                 {actioning ? 'Processing…' : 'Start Processing'}
               </button>
