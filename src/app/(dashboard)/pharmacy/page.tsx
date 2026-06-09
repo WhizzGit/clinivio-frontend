@@ -291,8 +291,19 @@ function PharmacyAnalyticsTab() {
   if (loading) return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading analytics…</div>;
   if (!data) return <div className="text-center text-gray-400 py-12">Analytics unavailable</div>;
 
-  const fmt = (n: number) => n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : `₹${n.toLocaleString('en-IN')}`;
-  const categoryEntries = Object.entries(data.inventory.categoryBreakdown).sort(([, a], [, b]) => b.value - a.value);
+  const fmt = (n: number | undefined | null) => {
+    const v = Number(n ?? 0);
+    return v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString('en-IN')}`;
+  };
+  const inv = Object.assign(
+    { totalItems: 0, inventoryValue: 0, lowStockCount: 0, lowStockValue: 0, expiringSoonCount: 0, expiringSoonValue: 0, categoryBreakdown: {} as Record<string, { count: number; value: number }> },
+    data.inventory ?? {},
+  );
+  const orders = Object.assign(
+    { dispensedToday: 0, dispensedMTD: 0, pending: 0, revenueMTD: 0 },
+    Array.isArray(data.orders) ? {} : (data.orders ?? {}),
+  );
+  const categoryEntries = Object.entries(inv.categoryBreakdown ?? {}).sort(([, a], [, b]) => b.value - a.value);
   const maxValue = Math.max(...categoryEntries.map(([, v]) => v.value), 1);
 
   return (
@@ -300,10 +311,10 @@ function PharmacyAnalyticsTab() {
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Inventory Value', value: fmt(data.inventory.inventoryValue), sub: `${data.inventory.totalItems} active medicines`, icon: '📦', color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' },
-          { label: 'Revenue (MTD)', value: fmt(data.orders.revenueMTD), sub: `${data.orders.dispensedMTD} orders dispensed`, icon: '💰', color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200' },
-          { label: 'Low Stock Risk', value: fmt(data.inventory.lowStockValue), sub: `${data.inventory.lowStockCount} items below reorder`, icon: '⚠️', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200' },
-          { label: 'Expiring Soon', value: fmt(data.inventory.expiringSoonValue), sub: `${data.inventory.expiringSoonCount} items in 90 days`, icon: '📅', color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200' },
+          { label: 'Inventory Value', value: fmt(inv.inventoryValue), sub: `${inv.totalItems ?? 0} active medicines`, icon: '📦', color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' },
+          { label: 'Revenue (MTD)', value: fmt(orders.revenueMTD), sub: `${orders.dispensedMTD ?? 0} orders dispensed`, icon: '💰', color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200' },
+          { label: 'Low Stock Risk', value: fmt(inv.lowStockValue), sub: `${inv.lowStockCount ?? 0} items below reorder`, icon: '⚠️', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200' },
+          { label: 'Expiring Soon', value: fmt(inv.expiringSoonValue), sub: `${inv.expiringSoonCount ?? 0} items in 90 days`, icon: '📅', color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200' },
         ].map(card => (
           <div key={card.label} className={`rounded-xl border p-4 ${card.bg} ${card.border}`}>
             <div className="text-2xl mb-2">{card.icon}</div>
@@ -320,9 +331,9 @@ function PharmacyAnalyticsTab() {
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Dispensing Activity</h3>
           <div className="space-y-3">
             {[
-              { label: 'Dispensed Today', value: data.orders.dispensedToday, color: 'text-green-700', bg: 'bg-green-100' },
-              { label: 'Dispensed This Month', value: data.orders.dispensedMTD, color: 'text-blue-700', bg: 'bg-blue-100' },
-              { label: 'Pending Orders', value: data.orders.pending, color: 'text-yellow-700', bg: 'bg-yellow-100' },
+              { label: 'Dispensed Today', value: orders.dispensedToday ?? 0, color: 'text-green-700', bg: 'bg-green-100' },
+              { label: 'Dispensed This Month', value: orders.dispensedMTD ?? 0, color: 'text-blue-700', bg: 'bg-blue-100' },
+              { label: 'Pending Orders', value: orders.pending ?? 0, color: 'text-yellow-700', bg: 'bg-yellow-100' },
             ].map(item => (
               <div key={item.label} className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">{item.label}</span>

@@ -474,18 +474,19 @@ function AnalyticsTab({ analytics, tests }: { analytics: Analytics | null; tests
   if (!analytics) return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading analytics…</div>;
 
   const CATEGORIES = ['Haematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Radiology', 'Other'];
-  const maxRevenue = Math.max(...Object.values(analytics.categoryBreakdown).map(c => c.revenue), 1);
-  const maxOrders = Math.max(...Object.values(analytics.categoryBreakdown).map(c => c.orderCount), 1);
+  const breakdown = analytics.categoryBreakdown ?? {};
+  const maxRevenue = Math.max(...Object.values(breakdown).map(c => c.revenue), 1);
+  const maxOrders = Math.max(...Object.values(breakdown).map(c => c.orderCount), 1);
 
   return (
     <div className="space-y-6">
       {/* Top metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Orders (30d)', value: analytics.totalOrders, sub: `${analytics.completedOrders} completed`, color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' },
-          { label: 'Revenue (30d)', value: `₹${analytics.completedRevenue.toLocaleString('en-IN')}`, sub: 'from completed tests', color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200' },
-          { label: 'Avg Turnaround', value: `${analytics.avgTurnaroundHours}h`, sub: 'order to completion', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200' },
-          { label: 'Critical Findings', value: `${analytics.criticalRate}%`, sub: `${analytics.criticalItems} critical items`, color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200' },
+          { label: 'Orders (30d)', value: analytics.totalOrders ?? 0, sub: `${analytics.completedOrders ?? 0} completed`, color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' },
+          { label: 'Revenue (30d)', value: `₹${(analytics.completedRevenue ?? 0).toLocaleString('en-IN')}`, sub: 'from completed tests', color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200' },
+          { label: 'Avg Turnaround', value: `${analytics.avgTurnaroundHours ?? 0}h`, sub: 'order to completion', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200' },
+          { label: 'Critical Findings', value: `${analytics.criticalRate ?? 0}%`, sub: `${analytics.criticalItems ?? 0} critical items`, color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200' },
         ].map(m => (
           <div key={m.label} className={cn('rounded-xl border p-4', m.bg, m.border)}>
             <p className={cn('text-2xl font-bold', m.color)}>{m.value}</p>
@@ -499,8 +500,8 @@ function AnalyticsTab({ analytics, tests }: { analytics: Analytics | null; tests
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h3 className="text-sm font-semibold text-gray-900 mb-4">Category Performance</h3>
         <div className="space-y-3">
-          {CATEGORIES.filter(cat => (analytics.categoryBreakdown[cat]?.testCount || 0) > 0 || tests.some(t => t.category === cat)).map(cat => {
-            const data = analytics.categoryBreakdown[cat] || { orderCount: 0, revenue: 0, testCount: 0, activeTests: 0 };
+          {CATEGORIES.filter(cat => (breakdown[cat]?.testCount || 0) > 0 || tests.some(t => t.category === cat)).map(cat => {
+            const data = breakdown[cat] || { orderCount: 0, revenue: 0, testCount: 0, activeTests: 0 };
             const catTests = tests.filter(t => t.category === cat);
             const revenueWidth = data.revenue > 0 ? Math.round((data.revenue / maxRevenue) * 100) : 0;
             const ordersWidth = data.orderCount > 0 ? Math.round((data.orderCount / maxOrders) * 100) : 0;
@@ -544,8 +545,8 @@ function AnalyticsTab({ analytics, tests }: { analytics: Analytics | null; tests
           {[
             { label: 'Total Tests', value: tests.length },
             { label: 'Active Tests', value: tests.filter(t => t.isActive).length },
-            { label: 'Avg Price', value: `₹${tests.length > 0 ? Math.round(tests.reduce((s, t) => s + t.price, 0) / tests.length) : 0}` },
-            { label: 'Revenue Potential/Visit', value: `₹${tests.filter(t => t.isActive).reduce((s, t) => s + t.price, 0).toLocaleString('en-IN')}` },
+            { label: 'Avg Price', value: `₹${tests.length > 0 ? Math.round(tests.reduce((s, t) => s + Number(t.price), 0) / tests.length) : 0}` },
+            { label: 'Revenue Potential/Visit', value: `₹${tests.filter(t => t.isActive).reduce((s, t) => s + Number(t.price), 0).toLocaleString('en-IN')}` },
           ].map(m => (
             <div key={m.label} className="bg-gray-50 rounded-lg p-3 text-center">
               <p className="text-xl font-bold text-gray-900">{m.value}</p>
@@ -677,7 +678,7 @@ export default function LabPage() {
           {CATEGORIES.filter(cat => (groupedTests[cat]?.length || 0) > 0).map(cat => {
             const catTests = groupedTests[cat] || [];
             const activeCount = catTests.filter(t => t.isActive).length;
-            const avgPrice = catTests.length > 0 ? Math.round(catTests.reduce((s, t) => s + t.price, 0) / catTests.length) : 0;
+            const avgPrice = catTests.length > 0 ? Math.round(catTests.reduce((s, t) => s + Number(t.price), 0) / catTests.length) : 0;
             return (
               <button key={cat} onClick={() => setCategoryFilter(cat === categoryFilter ? '' : cat)}
                 className={cn('w-full text-left px-3 py-2.5 rounded-lg mb-1 transition-colors',
@@ -728,7 +729,7 @@ export default function LabPage() {
               <span className="text-xl">{CATEGORY_ICONS[categoryFilter]}</span>
               <div>
                 <p className="text-sm font-semibold text-teal-900">Filtered: {categoryFilter}</p>
-                <p className="text-xs text-teal-700">{(analytics.categoryBreakdown[categoryFilter]?.orderCount || 0)} orders · ₹{(analytics.categoryBreakdown[categoryFilter]?.revenue || 0).toLocaleString('en-IN')} revenue (30d)</p>
+                <p className="text-xs text-teal-700">{(analytics.categoryBreakdown?.[categoryFilter]?.orderCount || 0)} orders · ₹{(analytics.categoryBreakdown?.[categoryFilter]?.revenue || 0).toLocaleString('en-IN')} revenue (30d)</p>
               </div>
             </div>
             <button onClick={() => setCategoryFilter('')} className="text-xs text-teal-600 hover:text-teal-800 underline">Clear filter</button>
