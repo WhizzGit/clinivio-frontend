@@ -586,18 +586,35 @@ export default function LabPage() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [ordersRes, statsRes, testsRes, analyticsRes] = await Promise.all([
-        appointmentApi.get(`/lab/orders${activeTab !== 'ALL' ? `?status=${activeTab}` : ''}`),
-        appointmentApi.get('/lab/analytics'),
+      // Fetch all orders (filter client-side) and tests in parallel.
+      // Analytics is fetched separately so a 403 doesn't break the main data.
+      const [ordersRes, testsRes] = await Promise.all([
+        appointmentApi.get('/lab/orders?limit=200'),
         appointmentApi.get('/lab/tests?all=true'),
-        Promise.resolve({ data: null }), // analytics already fetched above
       ]);
-      setOrders(ordersRes.data?.data || ordersRes.data || []);
-      setStats(statsRes.data);
+      const fetchedOrders: LabOrder[] = ordersRes.data?.data || ordersRes.data || [];
+      setOrders(fetchedOrders);
       setTests(testsRes.data?.data || testsRes.data || []);
-      if (analyticsRes.data) setAnalytics(analyticsRes.data);
+
+      // Compute mini stats from the orders list
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      setStats({
+        pending: fetchedOrders.filter(o => o.status === 'PENDING').length,
+        sampleCollected: fetchedOrders.filter(o => o.status === 'SAMPLE_COLLECTED').length,
+        inProgress: fetchedOrders.filter(o => o.status === 'IN_PROGRESS').length,
+        completedToday: fetchedOrders.filter(o => o.status === 'COMPLETED' && !!o.completedAt && new Date(o.completedAt) >= today).length,
+        total: fetchedOrders.length,
+      });
     } catch { setOrders([]); } finally { setLoading(false); }
-  }, [activeTab, canManageCatalog]);
+  }, []);
+
+  // Analytics fetch is separate and ADMIN/LAB_TECHNICIAN/DOCTOR/NURSE accessible.
+  // It does not block the main data load.
+  useEffect(() => {
+    appointmentApi.get('/lab/analytics')
+      .then(res => setAnalytics(res.data))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -611,9 +628,9 @@ export default function LabPage() {
     return acc;
   }, {});
 
-  const filteredOrders = categoryFilter
-    ? orders.filter(o => o.items.some(i => tests.find(t => t.id === i.labTestId)?.category === categoryFilter))
-    : orders;
+  const filteredOrders = orders
+    .filter(o => activeTab === 'ALL' || o.status === activeTab)
+    .filter(o => !categoryFilter || o.items.some(i => tests.find(t => t.id === i.labTestId)?.category === categoryFilter));
 
   return (
     <div className="flex gap-6 -mx-6 -mt-6 h-[calc(100vh-4rem)]">

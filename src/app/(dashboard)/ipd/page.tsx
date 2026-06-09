@@ -242,14 +242,19 @@ function AdmitPatientModal({ onClose, onSuccess }: { onClose: () => void; onSucc
   useEffect(() => { if (form.roomId) loadBeds(form.roomId); }, [form.roomId]);
 
   async function loadDoctors() {
-    try { const r = await appointmentApi.get("/ipd/admissions"); setDoctors([]); } catch {}
-    // Doctors come from IAM; use appointmentApi for available-beds
+    try {
+      const r = await appointmentApi.get("/users?role=DOCTOR&limit=100");
+      setDoctors(r.data?.data ?? r.data ?? []);
+    } catch { setDoctors([]); }
   }
   async function loadRooms() {
     try { const r = await appointmentApi.get("/rooms"); setRooms(r.data); } catch {}
   }
   async function loadBeds(roomId: string) {
-    try { const r = await appointmentApi.get(`/rooms/available-beds?roomId=${roomId}`); setAvailableBeds(r.data); } catch {}
+    try {
+      const r = await appointmentApi.get(`/rooms/beds?roomId=${roomId}&status=AVAILABLE`);
+      setAvailableBeds(r.data?.data ?? r.data ?? []);
+    } catch { setAvailableBeds([]); }
   }
   async function searchPatients(q: string) {
     if (q.length < 2) { setPatients([]); return; }
@@ -321,6 +326,14 @@ function AdmitPatientModal({ onClose, onSuccess }: { onClose: () => void; onSucc
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Admission Reason *</label>
             <textarea className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} value={form.admissionReason} onChange={F("admissionReason")} placeholder="Chief complaint / reason for admission..." />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Attending Doctor <span className="text-gray-400 font-normal text-xs">(optional)</span></label>
+            <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" value={form.attendingDoctorId} onChange={F("attendingDoctorId")}>
+              <option value="">Select doctor</option>
+              {doctors.map((d: any) => <option key={d.id} value={d.id}>Dr. {d.firstName} {d.lastName}</option>)}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

@@ -312,15 +312,21 @@ export default function ConsultationPage() {
     setMeds(meds.map((m, idx) => idx === i ? { ...m, [f]: v } : m));
   const removeMed = (i: number) => setMeds(meds.filter((_, idx) => idx !== i));
 
+  const isNurse = user?.role === 'NURSE';
   const bmi = calcBMI(vitals.weightKg, vitals.heightCm);
   const bmiInfo = bmi ? bmiCategory(bmi) : null;
 
-  const TABS = [
-    { id: 'vitals', label: 'Vitals & Notes' },
-    { id: 'prescription', label: 'Prescription' },
-    { id: 'followup', label: 'Follow-up' + (followUps.length > 0 ? ` (${followUps.length})` : '') },
-    { id: 'history', label: 'History' + (history.length > 0 ? ` (${history.length})` : '') },
-  ];
+  const TABS = isNurse
+    ? [
+        { id: 'vitals', label: 'Vitals & Notes' },
+        { id: 'history', label: 'History' + (history.length > 0 ? ` (${history.length})` : '') },
+      ]
+    : [
+        { id: 'vitals', label: 'Vitals & Notes' },
+        { id: 'prescription', label: 'Prescription' },
+        { id: 'followup', label: 'Follow-up' + (followUps.length > 0 ? ` (${followUps.length})` : '') },
+        { id: 'history', label: 'History' + (history.length > 0 ? ` (${history.length})` : '') },
+      ];
 
   const tabCls = (t: string) =>
     `px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
@@ -358,29 +364,44 @@ export default function ConsultationPage() {
           <h1 className="text-xl font-bold text-gray-900">Consultation</h1>
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          <button
-            onClick={printPrescription}
-            disabled={printing || !appt}
-            title="Print prescription"
-            className="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors flex items-center gap-1.5"
-          >
-            🖨 Print Rx
-          </button>
-          <button
-            onClick={() => complete(false)}
-            disabled={completing}
-            className="px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 font-medium disabled:opacity-50 transition-colors"
-          >
-            {completing ? '…' : 'Complete'}
-          </button>
-          <button
-            onClick={() => complete(true)}
-            disabled={completing}
-            className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold disabled:opacity-50 transition-colors flex items-center gap-2"
-          >
-            {completing ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
-            Complete & Send to Pharmacy
-          </button>
+          {!isNurse && (
+            <button
+              onClick={printPrescription}
+              disabled={printing || !appt}
+              title="Print prescription"
+              className="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+            >
+              🖨 Print Rx
+            </button>
+          )}
+          {!isNurse && (
+            <button
+              onClick={() => complete(false)}
+              disabled={completing}
+              className="px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 font-medium disabled:opacity-50 transition-colors"
+            >
+              {completing ? '…' : 'Complete'}
+            </button>
+          )}
+          {!isNurse && (
+            <button
+              onClick={() => complete(true)}
+              disabled={completing}
+              className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold disabled:opacity-50 transition-colors flex items-center gap-2"
+            >
+              {completing ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
+              Complete & Send to Pharmacy
+            </button>
+          )}
+          {isNurse && (
+            <button
+              onClick={saveVitals}
+              disabled={saving}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50 transition-colors"
+            >
+              {saving ? '…' : 'Save Vitals'}
+            </button>
+          )}
         </div>
       </div>
 
