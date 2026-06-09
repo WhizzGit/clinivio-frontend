@@ -94,17 +94,6 @@ export default function DoctorQueuePage() {
     }
   }
 
-  async function checkIn(appt: QueueEntry) {
-    setActionLoading(appt.id + '-checkin');
-    try {
-      await appointmentApi.post(`/appointments/${appt.id}/check-in`);
-      showToast(`${appt.patient.firstName} checked in`);
-      await fetchQueue();
-    } catch (err: any) {
-      showToast(err?.response?.data?.message || 'Check-in failed', 'error');
-    } finally { setActionLoading(null); }
-  }
-
   /** Reverse an accidental check-in — CHECKED_IN → CONFIRMED */
   async function undoCheckIn(appt: QueueEntry) {
     setActionLoading(appt.id + '-undo');
@@ -148,6 +137,93 @@ export default function DoctorQueuePage() {
     return <div className="flex items-center justify-center h-64 text-gray-400">Loading queue...</div>;
   }
 
+  // ── Nurse view: only IN_PROGRESS patients, vitals only ──────────────────────
+  if (isNurse) {
+    return (
+      <div>
+        {toast && (
+          <div className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg ${
+            toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+          }`}>
+            {toast.msg}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Patient Vitals</h1>
+            <p className="text-sm text-gray-500">Patients currently in consultation — auto-refreshes every 15 s</p>
+          </div>
+          <button onClick={fetchQueue} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            Refresh
+          </button>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 mb-6 flex items-center gap-3">
+          <span className="text-2xl">🩺</span>
+          <div>
+            <p className="text-sm font-semibold text-blue-900">
+              {appointments.length} patient{appointments.length !== 1 ? 's' : ''} in consultation right now
+            </p>
+            <p className="text-xs text-blue-700 mt-0.5">Select any patient to record or update their vitals</p>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h2 className="font-medium text-gray-700">In-Progress Patients</h2>
+          </div>
+          {loading ? (
+            <div className="flex items-center justify-center h-32 text-gray-400">Loading…</div>
+          ) : appointments.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-32 text-gray-400">
+              <p className="text-3xl mb-2">🏥</p>
+              <p className="text-sm">No patients in consultation right now</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500 w-16">Token</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Patient</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Doctor</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Complaint</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500 w-36">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {appointments
+                  .sort((a, b) => a.tokenNumber - b.tokenNumber)
+                  .map(appt => (
+                    <tr key={appt.id} className="bg-orange-50 hover:bg-orange-100 transition-colors">
+                      <td className="px-4 py-3 font-mono font-bold text-gray-900">#{appt.tokenNumber}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-gray-900">{appt.patient?.firstName} {appt.patient?.lastName}</p>
+                        <p className="text-xs text-gray-400">{appt.patient?.uhid} · {age(appt.patient?.dob)} · {appt.patient?.gender?.toLowerCase()}</p>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {(appt as any).doctor ? `Dr. ${(appt as any).doctor.firstName} ${(appt as any).doctor.lastName}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{appt.chiefComplaint || '—'}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => enterVitals(appt)}
+                          className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                        >
+                          📋 Update Vitals
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Doctor / Admin view ───────────────────────────────────────────────────────
   return (
     <div>
       {toast && (
@@ -302,82 +378,40 @@ export default function DoctorQueuePage() {
                         </span>
                       </td>
 
-                      {/* ── Action buttons — role-aware ─────────────────── */}
+                      {/* ── Doctor action buttons ─────────────────── */}
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1.5">
-
-                          {isNurse ? (
-                            /* ── NURSE ───────────────────────────────────── */
+                          {appt.status === 'CONFIRMED' && (
+                            <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
+                              className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                              {busy('-start') ? '…' : 'Check In + Start →'}
+                            </button>
+                          )}
+                          {appt.status === 'CHECKED_IN' && (
                             <>
-                              {appt.status === 'CONFIRMED' && (
-                                <>
-                                  <button onClick={() => checkIn(appt)} disabled={busy('-checkin')}
-                                    className="px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 disabled:opacity-50">
-                                    {busy('-checkin') ? '…' : 'Check In'}
-                                  </button>
-                                  <button onClick={() => enterVitals(appt)}
-                                    className="px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200">
-                                    📋 Vitals
-                                  </button>
-                                </>
-                              )}
-                              {appt.status === 'CHECKED_IN' && (
-                                <>
-                                  <button onClick={() => enterVitals(appt)}
-                                    className="px-2.5 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                                    📋 Vitals
-                                  </button>
-                                  <button onClick={() => undoCheckIn(appt)} disabled={busy('-undo')}
-                                    title="Reverse accidental check-in"
-                                    className="px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 disabled:opacity-50">
-                                    {busy('-undo') ? '…' : '↩ Undo'}
-                                  </button>
-                                </>
-                              )}
-                              {(appt.status === 'IN_PROGRESS' || appt.status === 'COMPLETED') && (
-                                <button onClick={() => enterVitals(appt)}
-                                  className="px-2.5 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200">
-                                  📋 {appt.status === 'COMPLETED' ? 'Edit Vitals' : 'Update Vitals'}
-                                </button>
-                              )}
-                            </>
-                          ) : (
-                            /* ── DOCTOR (default) ────────────────────────── */
-                            <>
-                              {appt.status === 'CONFIRMED' && (
-                                <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
-                                  className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                                  {busy('-start') ? '…' : 'Check In + Start →'}
-                                </button>
-                              )}
-                              {appt.status === 'CHECKED_IN' && (
-                                <>
-                                  <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
-                                    className="px-3 py-1 text-xs font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50">
-                                    {busy('-start') ? '…' : 'Start →'}
-                                  </button>
-                                  <button onClick={() => undoCheckIn(appt)} disabled={busy('-undo')}
-                                    title="Reverse accidental check-in"
-                                    className="px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 disabled:opacity-50">
-                                    {busy('-undo') ? '…' : '↩ Undo'}
-                                  </button>
-                                </>
-                              )}
-                              {appt.status === 'IN_PROGRESS' && (
-                                <button onClick={() => router.push(`/consultation/${appt.id}`)}
-                                  className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700">
-                                  Continue →
-                                </button>
-                              )}
-                              {appt.status === 'COMPLETED' && (
-                                <button onClick={() => router.push(`/consultation/${appt.id}`)}
-                                  className="px-3 py-1 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50">
-                                  View
-                                </button>
-                              )}
+                              <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
+                                className="px-3 py-1 text-xs font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50">
+                                {busy('-start') ? '…' : 'Start →'}
+                              </button>
+                              <button onClick={() => undoCheckIn(appt)} disabled={busy('-undo')}
+                                title="Reverse accidental check-in"
+                                className="px-2.5 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+                                {busy('-undo') ? '…' : '↩ Undo'}
+                              </button>
                             </>
                           )}
-
+                          {appt.status === 'IN_PROGRESS' && (
+                            <button onClick={() => router.push(`/consultation/${appt.id}`)}
+                              className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700">
+                              Continue →
+                            </button>
+                          )}
+                          {appt.status === 'COMPLETED' && (
+                            <button onClick={() => router.push(`/consultation/${appt.id}`)}
+                              className="px-3 py-1 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50">
+                              View
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
