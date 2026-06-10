@@ -137,8 +137,22 @@ export default function DoctorQueuePage() {
     return <div className="flex items-center justify-center h-64 text-gray-400">Loading queue...</div>;
   }
 
-  // ── Nurse view: only IN_PROGRESS patients, vitals only ──────────────────────
+  // ── Nurse view: all active patients today across all doctors ─────────────────
   if (isNurse) {
+    const nurseActive    = appointments.filter(a => ['CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS'].includes(a.status));
+    const nurseCompleted = appointments.filter(a => a.status === 'COMPLETED');
+
+    const STATUS_ROW_CLS: Record<string, string> = {
+      CONFIRMED:   'bg-blue-50 hover:bg-blue-100',
+      CHECKED_IN:  'bg-yellow-50 hover:bg-yellow-100',
+      IN_PROGRESS: 'bg-orange-50 hover:bg-orange-100',
+    };
+    const STATUS_BADGE_CLS: Record<string, string> = {
+      CONFIRMED:   'bg-blue-100 text-blue-700',
+      CHECKED_IN:  'bg-yellow-100 text-yellow-700',
+      IN_PROGRESS: 'bg-orange-100 text-orange-700',
+    };
+
     return (
       <div>
         {toast && (
@@ -151,34 +165,38 @@ export default function DoctorQueuePage() {
 
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Patient Vitals</h1>
-            <p className="text-sm text-gray-500">Patients currently in consultation — auto-refreshes every 15 s</p>
+            <h1 className="text-xl font-bold text-gray-900">Patient Queue — Vitals</h1>
+            <p className="text-sm text-gray-500">All active patients today · auto-refreshes every 15 s</p>
           </div>
           <button onClick={fetchQueue} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
             Refresh
           </button>
         </div>
 
-        <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 mb-6 flex items-center gap-3">
-          <span className="text-2xl">🩺</span>
-          <div>
-            <p className="text-sm font-semibold text-blue-900">
-              {appointments.length} patient{appointments.length !== 1 ? 's' : ''} in consultation right now
-            </p>
-            <p className="text-xs text-blue-700 mt-0.5">Select any patient to record or update their vitals</p>
-          </div>
+        {/* Summary chips */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          {[
+            { label: 'Waiting',     count: appointments.filter(a => a.status === 'CONFIRMED').length,   color: 'bg-blue-50 text-blue-700'    },
+            { label: 'Checked In',  count: appointments.filter(a => a.status === 'CHECKED_IN').length,  color: 'bg-yellow-50 text-yellow-700' },
+            { label: 'In Progress', count: appointments.filter(a => a.status === 'IN_PROGRESS').length, color: 'bg-orange-50 text-orange-700' },
+          ].map(s => (
+            <div key={s.label} className={`${s.color} rounded-xl p-4`}>
+              <p className="text-2xl font-bold">{s.count}</p>
+              <p className="text-xs mt-0.5 opacity-80">{s.label}</p>
+            </div>
+          ))}
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100">
-            <h2 className="font-medium text-gray-700">In-Progress Patients</h2>
+            <h2 className="font-medium text-gray-700">Active Patients ({nurseActive.length})</h2>
           </div>
           {loading ? (
             <div className="flex items-center justify-center h-32 text-gray-400">Loading…</div>
-          ) : appointments.length === 0 ? (
+          ) : nurseActive.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 text-gray-400">
               <p className="text-3xl mb-2">🏥</p>
-              <p className="text-sm">No patients in consultation right now</p>
+              <p className="text-sm">No active patients today</p>
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -187,15 +205,16 @@ export default function DoctorQueuePage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-500 w-16">Token</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Patient</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Doctor</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Complaint</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-500 w-36">Action</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500 w-32">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {appointments
+                {nurseActive
                   .sort((a, b) => a.tokenNumber - b.tokenNumber)
                   .map(appt => (
-                    <tr key={appt.id} className="bg-orange-50 hover:bg-orange-100 transition-colors">
+                    <tr key={appt.id} className={`${STATUS_ROW_CLS[appt.status] ?? 'hover:bg-gray-50'} transition-colors`}>
                       <td className="px-4 py-3 font-mono font-bold text-gray-900">#{appt.tokenNumber}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-gray-900">{appt.patient?.firstName} {appt.patient?.lastName}</p>
@@ -204,13 +223,18 @@ export default function DoctorQueuePage() {
                       <td className="px-4 py-3 text-gray-600 text-xs">
                         {(appt as any).doctor ? `Dr. ${(appt as any).doctor.firstName} ${(appt as any).doctor.lastName}` : '—'}
                       </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_BADGE_CLS[appt.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                          {STATUS_LABELS[appt.status] ?? appt.status}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{appt.chiefComplaint || '—'}</td>
                       <td className="px-4 py-3">
                         <button
                           onClick={() => enterVitals(appt)}
                           className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                         >
-                          📋 Update Vitals
+                          📋 Vitals
                         </button>
                       </td>
                     </tr>
@@ -219,6 +243,26 @@ export default function DoctorQueuePage() {
             </table>
           )}
         </div>
+
+        {nurseCompleted.length > 0 && (
+          <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <h2 className="font-medium text-gray-500 text-sm">Completed Today ({nurseCompleted.length})</h2>
+            </div>
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-100">
+                {nurseCompleted.sort((a, b) => a.tokenNumber - b.tokenNumber).map(appt => (
+                  <tr key={appt.id} className="hover:bg-gray-50 text-gray-400">
+                    <td className="px-4 py-2.5 font-mono text-xs w-16">#{appt.tokenNumber}</td>
+                    <td className="px-4 py-2.5 text-xs">{appt.patient?.firstName} {appt.patient?.lastName}</td>
+                    <td className="px-4 py-2.5 text-xs">{(appt as any).doctor ? `Dr. ${(appt as any).doctor.firstName} ${(appt as any).doctor.lastName}` : '—'}</td>
+                    <td className="px-4 py-2.5"><span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Completed</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   }
