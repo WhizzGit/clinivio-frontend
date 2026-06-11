@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { appointmentApi } from "@/lib/api";
+import { appointmentApi, billingApi } from "@/lib/api";
 import {
   Activity, Stethoscope, Scissors, FileText, ClipboardList,
   ChevronLeft, Plus, X, CheckCircle, AlertCircle, Camera,
@@ -42,12 +42,20 @@ export default function IPDDetailPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("vitals");
   const [actionMsg, setActionMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [admissionPaymentPending, setAdmissionPaymentPending] = useState(false);
 
   useEffect(() => { load(); }, [admissionId]);
 
   async function load() {
     setLoading(true);
-    try { const r = await appointmentApi.get(`/ipd/admissions/${admissionId}`); setAdmission(r.data); }
+    try {
+      const r = await appointmentApi.get(`/ipd/admissions/${admissionId}`);
+      setAdmission(r.data);
+      billingApi.get(`/invoices/by-admission/${admissionId}`).then(res => {
+        const invoices: any[] = res.data || [];
+        setAdmissionPaymentPending(invoices.some(inv => inv.paymentStatus === 'PENDING'));
+      }).catch(() => {});
+    }
     catch { /* handled */ }
     finally { setLoading(false); }
   }
@@ -130,6 +138,13 @@ export default function IPDDetailPage() {
             </div>
           )}
         </div>
+
+        {admissionPaymentPending && (
+          <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-medium">
+            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            Admission fee payment pending — visit Billing Counter to collect payment
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 mt-4 overflow-x-auto">

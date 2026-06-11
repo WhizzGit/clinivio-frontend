@@ -1047,10 +1047,34 @@ export default function ConsultationPage() {
                   <div className="mt-3 pt-3 border-t border-gray-100">
                     <p className="text-xs font-medium text-gray-500 mb-1.5">Prescribed</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {h.prescriptions[0].items.map((m, i) => (
+                      {h.prescriptions[0].items.map((m: any, i: number) => (
                         <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
                           {m.medicineName} {m.dosage} · {m.frequency} · {m.duration}
                         </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(h as any).labOrders?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    <p className="text-xs font-medium text-gray-500 mb-1.5">Lab Tests</p>
+                    <div className="space-y-1.5">
+                      {(h as any).labOrders.map((o: any) => (
+                        <div key={o.id} className="bg-gray-50 rounded-lg p-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-mono text-gray-600">{o.orderNumber}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${o.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{o.status.replace(/_/g, ' ')}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {o.items?.map((item: any) => (
+                              <span key={item.id} className={`text-xs px-2 py-0.5 rounded ${item.result ? 'bg-teal-50 text-teal-800' : 'bg-gray-100 text-gray-500'}`}>
+                                {item.labTest?.name}
+                                {item.result ? `: ${item.result} ${item.unit ?? ''}`.trim() : ''}
+                                {item.flag && item.flag !== 'NORMAL' ? ` ⚠` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>

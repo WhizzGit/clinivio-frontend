@@ -23,18 +23,24 @@ interface QueueStatus {
 }
 
 const STATUS_COLORS: Record<string, string> = {
+  REGISTERED: 'bg-gray-100 text-gray-600',
+  PENDING_PAYMENT: 'bg-purple-100 text-purple-700',
   CONFIRMED: 'bg-blue-100 text-blue-700',
   CHECKED_IN: 'bg-yellow-100 text-yellow-700',
   IN_PROGRESS: 'bg-orange-100 text-orange-700',
   COMPLETED: 'bg-green-100 text-green-700',
+  SENT_TO_PHARMACY: 'bg-teal-100 text-teal-700',
   CANCELLED: 'bg-red-100 text-red-600',
 };
 
 const STATUS_LABELS: Record<string, string> = {
+  REGISTERED: 'Registered',
+  PENDING_PAYMENT: 'Pending Payment',
   CONFIRMED: 'Waiting',
   CHECKED_IN: 'Checked In',
   IN_PROGRESS: 'In Progress',
   COMPLETED: 'Completed',
+  SENT_TO_PHARMACY: 'At Pharmacy',
   CANCELLED: 'Cancelled',
 };
 
@@ -79,6 +85,10 @@ export default function DoctorQueuePage() {
 
   /** Check in (if needed) then start consultation and navigate */
   async function startConsultation(appt: QueueEntry) {
+    if (['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status)) {
+      showToast('Payment must be confirmed before starting consultation', 'error');
+      return;
+    }
     setActionLoading(appt.id + '-start');
     try {
       if (appt.status === 'CONFIRMED') {
@@ -120,8 +130,8 @@ export default function DoctorQueuePage() {
 
   const [activeFilter, setActiveFilter] = useState<'waiting' | 'completed' | 'all' | null>(null);
 
-  const active = appointments.filter(a => ['CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS'].includes(a.status));
-  const completed = appointments.filter(a => a.status === 'COMPLETED');
+  const active = appointments.filter(a => !['COMPLETED', 'SENT_TO_PHARMACY', 'CANCELLED'].includes(a.status));
+  const completed = appointments.filter(a => ['COMPLETED', 'SENT_TO_PHARMACY'].includes(a.status));
 
   const filteredAppointments = activeFilter === 'waiting'
     ? active
@@ -394,7 +404,7 @@ export default function DoctorQueuePage() {
             <tbody className="divide-y divide-gray-100">
               {filteredAppointments
                 .sort((a, b) => {
-                  const order: Record<string, number> = { IN_PROGRESS: 0, CHECKED_IN: 1, CONFIRMED: 2, COMPLETED: 3 };
+                  const order: Record<string, number> = { IN_PROGRESS: 0, CHECKED_IN: 1, CONFIRMED: 2, REGISTERED: 3, PENDING_PAYMENT: 4, SENT_TO_PHARMACY: 5, COMPLETED: 6 };
                   return (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.tokenNumber - b.tokenNumber;
                 })
                 .map((appt) => {
@@ -404,7 +414,7 @@ export default function DoctorQueuePage() {
                       key={appt.id}
                       className={
                         appt.status === 'IN_PROGRESS' ? 'bg-orange-50' :
-                        appt.status === 'COMPLETED' ? 'opacity-60 bg-gray-50' :
+                        appt.status === 'COMPLETED' || appt.status === 'SENT_TO_PHARMACY' ? 'opacity-60 bg-gray-50' :
                         'hover:bg-gray-50'
                       }
                     >
@@ -425,6 +435,9 @@ export default function DoctorQueuePage() {
                       {/* ── Doctor action buttons ─────────────────── */}
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1.5">
+                          {['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status) && (
+                            <span className="text-xs text-gray-400 italic">Awaiting payment</span>
+                          )}
                           {appt.status === 'CONFIRMED' && (
                             <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
                               className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
@@ -450,7 +463,7 @@ export default function DoctorQueuePage() {
                               Continue →
                             </button>
                           )}
-                          {appt.status === 'COMPLETED' && (
+                          {['COMPLETED', 'SENT_TO_PHARMACY'].includes(appt.status) && (
                             <button onClick={() => router.push(`/consultation/${appt.id}`)}
                               className="px-3 py-1 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50">
                               View

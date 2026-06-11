@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { patientApi, appointmentApi } from '@/lib/api';
+import { patientApi, appointmentApi, billingApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +22,12 @@ interface Appointment {
   doctor?: { firstName: string; lastName: string };
   department?: { name: string; icon?: string };
   slot?: { slotDate: string; startTime: string };
+}
+
+interface Invoice {
+  id: string; invoiceNumber: string; invoiceType: string;
+  invoiceDate: string; totalAmount: string; paymentStatus: string;
+  paymentMethod?: string; paidAt?: string; notes?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -281,7 +287,7 @@ function NewApptModal({ patientId, onClose, onSuccess }: {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'history';
+type Tab = 'overview' | 'history' | 'billing';
 
 export default function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -291,9 +297,11 @@ export default function PatientDetailPage() {
 
   const [patient, setPatient] = useState<Patient | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [tab, setTab] = useState<Tab>('overview');
   const [loadingPatient, setLoadingPatient] = useState(true);
   const [loadingAppts, setLoadingAppts] = useState(false);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [editModal, setEditModal] = useState(false);
   const [apptModal, setApptModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -317,8 +325,18 @@ export default function PatientDetailPage() {
     finally { setLoadingAppts(false); }
   }, [id]);
 
+  const fetchInvoices = useCallback(async () => {
+    try {
+      setLoadingInvoices(true);
+      const res = await billingApi.get(`/invoices/by-patient/${id}`);
+      setInvoices(res.data || []);
+    } catch { setInvoices([]); }
+    finally { setLoadingInvoices(false); }
+  }, [id]);
+
   useEffect(() => { fetchPatient(); }, [fetchPatient]);
   useEffect(() => { if (tab === 'history') fetchAppointments(); }, [tab, fetchAppointments]);
+  useEffect(() => { if (tab === 'billing') fetchInvoices(); }, [tab, fetchInvoices]);
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 4000); }
 
@@ -405,11 +423,11 @@ export default function PatientDetailPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
-        {(['overview', 'history'] as Tab[]).map(t => (
+        {(['overview', 'history', 'billing'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={cn('px-5 py-1.5 text-sm font-medium rounded-lg transition-colors capitalize',
+            className={cn('px-5 py-1.5 text-sm font-medium rounded-lg transition-colors',
               tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
-            {t === 'history' ? 'Appointment History' : 'Overview'}
+            {t === 'history' ? 'Appointment History' : t === 'billing' ? 'Billing' : 'Overview'}
           </button>
         ))}
       </div>
@@ -452,6 +470,71 @@ export default function PatientDetailPage() {
               {p.consentGivenAt && <Row label="Consent Given" value={fmt(p.consentGivenAt)} />}
             </dl>
           </div>
+        </div>
+      )}
+
+      {/* Billing tab */}
+      {tab === 'billing' && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          {loadingInvoices ? (
+            <div className="flex items-center justify-center h-32 text-gray-400">Loading invoices…</div>
+          ) : invoices.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-32 text-gray-400">
+              <p>No invoices found for this patient</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Invoice #</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Type</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Date</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-500">Amount</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Method</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {invoices.map(inv => {
+                  const statusColor =
+                    inv.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' :
+                    inv.paymentStatus === 'REFUNDED' ? 'bg-gray-100 text-gray-500' :
+                    'bg-yellow-100 text-yellow-700';
+                  const typeLabel = inv.invoiceType.replace(/_/g, ' ');
+                  return (
+                    <tr key={inv.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-mono text-xs text-blue-700">{inv.invoiceNumber}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">{typeLabel}</span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{fmt(inv.invoiceDate)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-gray-900">
+                        ₹{parseFloat(inv.totalAmount).toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{inv.paymentMethod ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn('inline-flex px-2 py-0.5 rounded-full text-xs font-medium', statusColor)}>
+                          {inv.paymentStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-gray-50 border-t border-gray-200">
+                <tr>
+                  <td colSpan={3} className="px-4 py-3 text-sm font-medium text-gray-600">Total paid</td>
+                  <td className="px-4 py-3 text-right text-sm font-bold text-gray-900">
+                    ₹{invoices
+                      .filter(i => i.paymentStatus === 'PAID')
+                      .reduce((sum, i) => sum + parseFloat(i.totalAmount), 0)
+                      .toLocaleString('en-IN')}
+                  </td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            </table>
+          )}
         </div>
       )}
 

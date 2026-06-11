@@ -564,7 +564,7 @@ export default function LabPage() {
   const { user } = useAuthStore();
   const role = user?.role ?? '';
   const canManageCatalog = ['ADMIN', 'LAB_TECHNICIAN'].includes(role);
-  const canEdit = ['ADMIN', 'LAB_TECHNICIAN'].includes(role);
+  const canEdit = ['ADMIN', 'LAB_TECHNICIAN', 'NURSE', 'DOCTOR'].includes(role);
 
   const [orders, setOrders] = useState<LabOrder[]>([]);
   const [tests, setTests] = useState<LabTest[]>([]);
