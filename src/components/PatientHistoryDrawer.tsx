@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { appointmentApi, billingApi } from '@/lib/api';
+import { appointmentApi, billingApi, patientApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import {
   generatePrescriptionHtml,
@@ -145,7 +145,15 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'visits' | 'consultations' | 'medications' | 'billing' | 'followups';
+type Tab = 'visits' | 'consultations' | 'medications' | 'billing' | 'followups' | 'ai';
+
+interface AiSummary {
+  summary: string | null;
+  visitCount: number;
+  generatedAt: string;
+  fromCache: boolean;
+  reason?: string;
+}
 
 export function PatientHistoryDrawer({ patient, onClose }: Props) {
   const { tenantProfile } = useAuthStore();
@@ -156,6 +164,9 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [printingReport, setPrintingReport] = useState(false);
+  const [aiSummary, setAiSummary] = useState<AiSummary | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // ── Derived: follow-ups across all consultations ──
   const allFollowUps = consultations.flatMap(c =>
