@@ -1,0 +1,86 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-frontend-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Patient portal: typecheck + build ──────────────────────────────────────
+  patient-portal:
+    name: Patient Portal (typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/patient
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/patient/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+        env:
+          # Required for next build — point at a placeholder during CI
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://example.com' }}
+
+  # ── Playwright E2E (only when staging URL is available) ─────────────────────
+  e2e:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    if: ${{ vars.E2E_ENABLED == 'true' }}
+    defaults:
+      run:
+        working-directory: apps/patient
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/patient/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run E2E tests against staging
+        run: pnpm test:e2e
+        env:
+          CI: true
+          PATIENT_PORTAL_URL: ${{ vars.STAGING_PATIENT_PORTAL_URL }}
+          TEST_TENANT_SLUG: ${{ vars.TEST_TENANT_SLUG }}
+          E2E_PATIENT_PHONE: ${{ secrets.E2E_PATIENT_PHONE }}
+          E2E_PATIENT_PASSWORD: ${{ secrets.E2E_PATIENT_PASSWORD }}
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/patient/playwright-report/
+          retention-days: 7

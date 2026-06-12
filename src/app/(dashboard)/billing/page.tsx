@@ -57,7 +57,7 @@ export default function BillingCounterPage() {
 
   const fetchPending = useCallback(async () => {
     try {
-      const res = await appointmentApi.get('/appointments/active?status=REGISTERED&status=PENDING_PAYMENT');
+      const res = await appointmentApi.get('/appointments/active?paymentStatus=PENDING');
       setPatients(res.data || []);
       setFetchError(false);
     } catch {
