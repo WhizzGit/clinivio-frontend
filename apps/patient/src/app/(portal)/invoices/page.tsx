@@ -1,18 +1,98 @@
 "use client";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, CreditCard, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toaster";
 import api from "@/lib/api";
 import { formatDate, formatCurrency, statusColor } from "@/lib/utils";
 import type { Invoice } from "@/types";
 
+// Razorpay checkout script loader (idempotent)
+function loadRazorpay(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined") return resolve(false);
+    if ((window as any).Razorpay) return resolve(true);
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 function InvoiceCard({ inv }: { inv: Invoice }) {
   const [open, setOpen] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const lineItems: any[] = Array.isArray(inv.lineItems) ? inv.lineItems : [];
   const tax = Number(inv.cgstAmount) + Number(inv.sgstAmount) + Number(inv.igstAmount);
   const isPaid = inv.paymentStatus === "PAID";
+
+  const handlePayOnline = useCallback(async () => {
+    setPaying(true);
+    try {
+      const loaded = await loadRazorpay();
+      if (!loaded) {
+        toast({ title: "Error", description: "Could not load payment gateway. Check your connection.", variant: "destructive" });
+        return;
+      }
+
+      // Create order on backend
+      const orderRes = await api.post("/patient-portal/payments/create-order", { invoiceId: inv.id });
+      const { orderId, amount, currency, keyId } = orderRes.data;
+
+      // Open Razorpay modal
+      await new Promise<void>((resolve, reject) => {
+        const rzp = new (window as any).Razorpay({
+          key: keyId,
+          amount,
+          currency,
+          order_id: orderId,
+          name: "Clinivio Health",
+          description: `Invoice #${inv.invoiceNumber}`,
+          theme: { color: "#2563eb" },
+          handler: async (response: any) => {
+            try {
+              // Verify on backend
+              await api.post("/patient-portal/payments/verify", {
+                invoiceId: inv.id,
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature,
+              });
+              toast({ title: "Payment successful!", description: `Invoice #${inv.invoiceNumber} has been paid.`, variant: "success" });
+              queryClient.invalidateQueries({ queryKey: ["invoices"] });
+              resolve();
+            } catch (err: any) {
+              toast({
+                title: "Verification failed",
+                description: err?.response?.data?.message ?? "Payment recorded but verification failed. Contact support.",
+                variant: "destructive",
+              });
+              reject(err);
+            }
+          },
+          modal: {
+            ondismiss: () => reject(new Error("dismissed")),
+          },
+        });
+        rzp.open();
+      });
+    } catch (err: any) {
+      if (err?.message !== "dismissed") {
+        toast({
+          title: "Payment failed",
+          description: err?.response?.data?.message ?? "Something went wrong. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setPaying(false);
+    }
+  }, [inv.id, inv.invoiceNumber, toast, queryClient]);
 
   return (
     <Card className={inv.paymentStatus === "PENDING" ? "border-yellow-200" : ""}>
@@ -41,7 +121,7 @@ function InvoiceCard({ inv }: { inv: Invoice }) {
 
         {open && (
           <div className="mt-4 border-t pt-4 space-y-4">
-            {/* Line items from JSONB */}
+            {/* Line items */}
             {lineItems.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Items</p>
@@ -95,8 +175,16 @@ function InvoiceCard({ inv }: { inv: Invoice }) {
                 Paid on {formatDate(inv.paidAt)} via {inv.paymentMethod?.replace(/_/g, " ") ?? "—"}
               </div>
             ) : (
-              <Button className="w-full" size="sm">
-                Pay {formatCurrency(Number(inv.totalAmount))} Online
+              <Button
+                className="w-full"
+                size="sm"
+                onClick={handlePayOnline}
+                disabled={paying}
+              >
+                {paying
+                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing…</>
+                  : `Pay ${formatCurrency(Number(inv.totalAmount))} Online`
+                }
               </Button>
             )}
           </div>

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toaster";
 import api from "@/lib/api";
 import { formatDate, formatDateTime, statusColor } from "@/lib/utils";
+import { useAppointmentSocket } from "@/hooks/useAppointmentSocket";
 import type { Appointment, DoctorProfile, DoctorSlot } from "@/types";
 
 const bookSchema = z.object({
@@ -155,6 +156,9 @@ export default function AppointmentsPage() {
   const [page, setPage] = useState(1);
   const qc = useQueryClient();
   const { toast } = useToast();
+
+  // Live appointment status updates via WebSocket
+  useAppointmentSocket();
 
   const { data, isLoading } = useQuery({
     queryKey: ["appointments", page],

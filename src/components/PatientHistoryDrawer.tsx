@@ -1,5 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts';
 import { appointmentApi, billingApi, patientApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import {
@@ -220,6 +223,43 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
   const medicationHistory = Array.from(medMap.values())
     .sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
 
+  // ── Derived: lab result trends (numeric results across consultations) ──────────
+
+  type TrendPoint = { label: string; value: number };
+  type LabTrend = { testName: string; unit?: string; points: TrendPoint[] };
+
+  const labTrends: LabTrend[] = (() => {
+    const trendMap = new Map<string, { unit?: string; points: TrendPoint[] }>();
+
+    const sorted = [...consultations].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+
+    for (const c of sorted) {
+      const label = new Date(c.appointment.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+      for (const order of c.labOrders || []) {
+        for (const item of order.items || []) {
+          if (!item.result) continue;
+          const numeric = parseFloat(item.result);
+          if (isNaN(numeric)) continue;
+          const key = item.labTest?.name?.toLowerCase() ?? 'unknown';
+          if (!trendMap.has(key)) {
+            trendMap.set(key, { unit: item.unit ?? undefined, points: [] });
+          }
+          trendMap.get(key)!.points.push({ label, value: numeric });
+        }
+      }
+    }
+
+    return Array.from(trendMap.entries())
+      .filter(([, v]) => v.points.length >= 2)
+      .map(([key, v]) => ({
+        testName: key.charAt(0).toUpperCase() + key.slice(1),
+        unit: v.unit,
+        points: v.points,
+      }));
+  })();
+
   // ── Data loading ──────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
@@ -381,6 +421,28 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
     }
   }
 
+  // ── AI Summary ───────────────────────────────────────────────────────────────
+
+  const fetchAiSummary = useCallback(async (refresh = false) => {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const url = `/patients/${patient.id}/ai-summary${refresh ? '?refresh=true' : ''}`;
+      const res = await appointmentApi.get(url);
+      setAiSummary(res.data);
+    } catch (err: any) {
+      setAiError(err?.response?.data?.message || 'Failed to generate AI summary');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [patient.id]);
+
+  useEffect(() => {
+    if (tab === 'ai' && !aiSummary && !aiLoading) {
+      fetchAiSummary();
+    }
+  }, [tab, aiSummary, aiLoading, fetchAiSummary]);
+
   // ── UI helpers ────────────────────────────────────────────────────────────────
 
   const tabCls = (t: Tab) =>
@@ -497,6 +559,10 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                 </span>
               )}
             </button>
+            <button className={tabCls('ai')} onClick={() => setTab('ai')}>
+              AI Summary
+              <span className="ml-1.5 text-xs bg-purple-100 text-purple-700 px-1 py-0.5 rounded font-medium">Beta</span>
+            </button>
           </div>
         </div>
 
@@ -563,6 +629,44 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
               {/* ── Consultations ── */}
               {tab === 'consultations' && (
                 <div className="space-y-4">
+
+                  {/* Lab trends section — only shown when 2+ data points for any test */}
+                  {labTrends.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-2">
+                      <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-3">
+                        Lab Result Trends
+                      </p>
+                      <div className="space-y-5">
+                        {labTrends.map(trend => (
+                          <div key={trend.testName}>
+                            <p className="text-xs font-medium text-gray-600 mb-1">
+                              {trend.testName}{trend.unit ? ` (${trend.unit})` : ''}
+                            </p>
+                            <ResponsiveContainer width="100%" height={120}>
+                              <LineChart data={trend.points} margin={{ top: 4, right: 16, left: -16, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e0e7ff" />
+                                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                                <YAxis tick={{ fontSize: 10 }} />
+                                <Tooltip
+                                  contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                                  formatter={(v: number) => [`${v}${trend.unit ? ' ' + trend.unit : ''}`, trend.testName]}
+                                />
+                                <Line
+                                  type="monotone"
+                                  dataKey="value"
+                                  stroke="#2563eb"
+                                  strokeWidth={2}
+                                  dot={{ r: 4, fill: '#2563eb' }}
+                                  activeDot={{ r: 6 }}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {consultations.length === 0 ? (
                     <div className="text-center text-gray-400 py-12">
                       <p className="text-3xl mb-2">🩺</p>
@@ -857,6 +961,111 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                         </div>
                       )}
                     </>
+                  )}
+                </div>
+              )}
+
+              {/* ── AI Summary ── */}
+              {tab === 'ai' && (
+                <div>
+                  {/* Disclaimer banner */}
+                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
+                    <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    </svg>
+                    <p className="text-xs text-amber-800 leading-relaxed">
+                      <span className="font-semibold">AI-generated — for clinical reference only.</span> Not a substitute for physician assessment. Patient data is de-identified before processing.
+                    </p>
+                  </div>
+
+                  {aiLoading ? (
+                    <div className="flex flex-col items-center justify-center py-16 gap-3">
+                      <span className="w-8 h-8 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
+                      <p className="text-sm text-gray-500">Generating clinical summary…</p>
+                    </div>
+                  ) : aiError ? (
+                    <div className="text-center py-12">
+                      <p className="text-3xl mb-2">⚠️</p>
+                      <p className="text-sm text-red-600 mb-3">{aiError}</p>
+                      <button
+                        onClick={() => fetchAiSummary()}
+                        className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : !aiSummary ? null : aiSummary.summary === null ? (
+                    <div className="text-center text-gray-400 py-12">
+                      <p className="text-3xl mb-2">🩺</p>
+                      <p className="text-sm">{aiSummary.reason || 'No consultation history available yet'}</p>
+                    </div>
+                  ) : (
+                    <div>
+                      {/* Cache / meta row */}
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          {aiSummary.fromCache ? (
+                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                              <span className="w-2 h-2 bg-green-400 rounded-full inline-block" />
+                              Cached · Generated {Math.round((Date.now() - new Date(aiSummary.generatedAt).getTime()) / 3600000)}h ago
+                            </span>
+                          ) : (
+                            <span className="text-xs text-purple-600 flex items-center gap-1">
+                              <span className="w-2 h-2 bg-purple-400 rounded-full inline-block" />
+                              Live · Just generated
+                            </span>
+                          )}
+                          <span className="text-xs text-gray-400">· {aiSummary.visitCount} consultation{aiSummary.visitCount !== 1 ? 's' : ''} analysed</span>
+                        </div>
+                        <button
+                          onClick={() => fetchAiSummary(true)}
+                          disabled={aiLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-50 disabled:opacity-50"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Regenerate
+                        </button>
+                      </div>
+
+                      {/* Summary content — rendered as markdown-like sections */}
+                      <div className="prose prose-sm max-w-none space-y-4">
+                        {aiSummary.summary.split(/^(#{1,3} .+)$/m).filter(Boolean).map((block, i) => {
+                          const headingMatch = block.match(/^#{1,3} (.+)/);
+                          if (headingMatch) {
+                            return (
+                              <h3 key={i} className="text-sm font-semibold text-gray-700 uppercase tracking-wide mt-4 mb-1">
+                                {headingMatch[1]}
+                              </h3>
+                            );
+                          }
+                          const lines = block.trim().split('\n').filter(Boolean);
+                          const isList = lines.every(l => l.startsWith('- ') || l.startsWith('* ') || /^\d+\./.test(l));
+                          if (isList) {
+                            return (
+                              <ul key={i} className="space-y-1 pl-4">
+                                {lines.map((line, j) => (
+                                  <li key={j} className="text-sm text-gray-700 list-disc">
+                                    {line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, '')}
+                                  </li>
+                                ))}
+                              </ul>
+                            );
+                          }
+                          return (
+                            <p key={i} className="text-sm text-gray-700 leading-relaxed">{block.trim()}</p>
+                          );
+                        })}
+                      </div>
+
+                      {/* Footer disclaimer from Claude */}
+                      <div className="mt-6 pt-4 border-t border-gray-100">
+                        <p className="text-xs text-gray-400 italic text-center">
+                          AI-generated summary · De-identified data · For clinical reference only
+                        </p>
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
