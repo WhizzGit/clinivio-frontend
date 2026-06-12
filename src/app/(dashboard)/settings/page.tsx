@@ -128,7 +128,7 @@ function SecurityTab({ userId, tenantId, role }: { userId?: string; tenantId?: s
 }
 
 export default function SettingsPage() {
-  const { user } = useAuthStore();
+  const { user, setTenantProfile } = useAuthStore();
   const isAdmin = user?.role === 'ADMIN';
   const [tab, setTab] = useState<Tab>('profile');
   const [form, setForm] = useState({
@@ -228,6 +228,19 @@ export default function SettingsPage() {
         state: hospitalForm.state || undefined,
         gstin: hospitalForm.gstin || undefined,
         drugLicenseNo: hospitalForm.drugLicenseNo || undefined,
+      });
+      setTenantProfile({
+        name: hospitalForm.name,
+        phone: hospitalForm.phone || null,
+        email: hospitalForm.email || null,
+        address: hospitalForm.address || null,
+        city: hospitalForm.city || null,
+        state: hospitalForm.state || null,
+        registrationNo: hospitalForm.registrationNo || null,
+        tagline: hospitalForm.tagline || null,
+        printHeader: hospitalForm.printHeader || null,
+        logoUrl: hospitalForm.logoUrl || null,
+        drugLicenseNo: hospitalForm.drugLicenseNo || null,
       });
       setMsg({ type: 'success', text: 'Hospital profile saved. Changes will reflect on printed documents.' });
     } catch (err: unknown) {

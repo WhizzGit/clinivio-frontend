@@ -1,6 +1,14 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { appointmentApi } from '@/lib/api';
+import { appointmentApi, billingApi } from '@/lib/api';
+import { useAuthStore } from '@/store/auth.store';
+import {
+  generatePrescriptionHtml,
+  generateReceiptHtml,
+  generatePatientReportHtml,
+  printDocument,
+} from '@/lib/print';
+import type { PrintMedItem } from '@/lib/print';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -36,6 +44,23 @@ interface RxItem {
   frequency: string;
   duration: string;
   instructions?: string;
+  quantity?: number;
+}
+
+interface LabOrderItem {
+  id?: string;
+  labTest: { name: string; code: string };
+  result?: string;
+  unit?: string;
+  flag?: string;
+}
+
+interface LabOrder {
+  id: string;
+  orderNumber: string;
+  status: string;
+  priority?: string;
+  items: LabOrderItem[];
 }
 
 interface ConsultRecord {
@@ -49,13 +74,29 @@ interface ConsultRecord {
   pulseRate?: number;
   temperature?: number;
   spo2?: number;
+  rbsMgDl?: number;
   weightKg?: number;
   heightCm?: number;
   bmi?: number;
+  respiratoryRate?: number;
   appointment: { visitType: string; chiefComplaint?: string; registeredAt: string };
   doctor: { firstName: string; lastName: string };
-  prescriptions: Array<{ items: RxItem[] }>;
+  prescriptions: Array<{ id?: string; items: RxItem[] }>;
   followUps: Array<{ id: string; followUpDate: string; notes?: string; isCompleted: boolean }>;
+  labOrders: LabOrder[];
+}
+
+interface InvoiceRecord {
+  id: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  invoiceType: string;
+  totalAmount: string;
+  paymentStatus: string;
+  paymentMethod: string | null;
+  paidAt?: string | null;
+  appointmentId?: string | null;
+  notes?: string | null;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -104,28 +145,84 @@ interface Props {
   onClose: () => void;
 }
 
+type Tab = 'visits' | 'consultations' | 'medications' | 'billing' | 'followups';
+
 export function PatientHistoryDrawer({ patient, onClose }: Props) {
-  const [tab, setTab] = useState<'visits' | 'consultations' | 'followups'>('visits');
+  const { tenantProfile } = useAuthStore();
+  const [tab, setTab] = useState<Tab>('visits');
   const [visits, setVisits] = useState<VisitRecord[]>([]);
   const [consultations, setConsultations] = useState<ConsultRecord[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [printingId, setPrintingId] = useState<string | null>(null);
+  const [printingReport, setPrintingReport] = useState(false);
 
+  // ── Derived: follow-ups across all consultations ──
   const allFollowUps = consultations.flatMap(c =>
     (c.followUps || []).map(f => ({ ...f, doctor: c.doctor, consultationDate: c.appointment.registeredAt }))
   ).sort((a, b) => new Date(a.followUpDate).getTime() - new Date(b.followUpDate).getTime());
 
   const pendingFollowUps = allFollowUps.filter(f => !f.isCompleted);
 
+  // ── Derived: medication history aggregated across all consultations ──
+  type MedEntry = {
+    medicineName: string;
+    dosage: string;
+    frequency: string;
+    duration: string;
+    instructions?: string;
+    count: number;
+    lastDate: string;
+    lastDoctor: { firstName: string; lastName: string };
+  };
+
+  const medMap = new Map<string, MedEntry>();
+  for (const c of consultations) {
+    for (const rx of c.prescriptions) {
+      for (const item of rx.items) {
+        const key = item.medicineName.toLowerCase().trim();
+        const existing = medMap.get(key);
+        if (!existing) {
+          medMap.set(key, {
+            medicineName: item.medicineName,
+            dosage: item.dosage,
+            frequency: item.frequency,
+            duration: item.duration,
+            instructions: item.instructions,
+            count: 1,
+            lastDate: c.appointment.registeredAt,
+            lastDoctor: c.doctor,
+          });
+        } else {
+          existing.count++;
+          if (new Date(c.appointment.registeredAt) > new Date(existing.lastDate)) {
+            existing.lastDate = c.appointment.registeredAt;
+            existing.lastDoctor = c.doctor;
+            existing.dosage = item.dosage;
+            existing.frequency = item.frequency;
+            existing.duration = item.duration;
+          }
+        }
+      }
+    }
+  }
+  const medicationHistory = Array.from(medMap.values())
+    .sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
+
+  // ── Data loading ──────────────────────────────────────────────────────────────
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [visitsRes, consultRes] = await Promise.all([
+      const [visitsRes, consultRes, invoicesRes] = await Promise.all([
         appointmentApi.get(`/appointments?patientId=${patient.id}&limit=100`),
         appointmentApi.get(`/patients/${patient.id}/history`).catch(() => ({ data: [] })),
+        billingApi.get(`/invoices/by-patient/${patient.id}`).catch(() => ({ data: [] })),
       ]);
       const vBody = visitsRes.data;
       setVisits(vBody?.data || vBody || []);
       setConsultations(consultRes.data || []);
+      setInvoices(invoicesRes.data || []);
     } catch {
       // show empty state
     } finally {
@@ -142,22 +239,155 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  const tabCls = (t: string) =>
-    `px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-      tab === t
-        ? 'border-blue-600 text-blue-600'
-        : 'border-transparent text-gray-500 hover:text-gray-700'
+  // ── Print handlers ────────────────────────────────────────────────────────────
+
+  function printConsultation(c: ConsultRecord) {
+    setPrintingId(c.id);
+    try {
+      const html = generatePrescriptionHtml({
+        tenant: tenantProfile ?? { name: 'Hospital' },
+        doctor: { firstName: c.doctor.firstName, lastName: c.doctor.lastName },
+        patient: {
+          firstName: patient.firstName,
+          lastName: patient.lastName || '',
+          uhid: patient.uhid,
+          phone: patient.phone || '',
+          dob: patient.dob,
+          gender: patient.gender,
+          bloodGroup: patient.bloodGroup,
+        },
+        appointment: {
+          chiefComplaint: c.appointment.chiefComplaint,
+          scheduledAt: c.appointment.registeredAt,
+        },
+        vitals: {
+          bpSystolic: c.bpSystolic,
+          bpDiastolic: c.bpDiastolic,
+          pulseRate: c.pulseRate,
+          temperature: c.temperature ? Number(c.temperature) : undefined,
+          spo2: c.spo2,
+          rbsMgDl: c.rbsMgDl,
+          weightKg: c.weightKg ? Number(c.weightKg) : undefined,
+          heightCm: c.heightCm ? Number(c.heightCm) : undefined,
+          bmi: c.bmi ? Number(c.bmi) : undefined,
+          respiratoryRate: c.respiratoryRate,
+        },
+        diagnosis: c.diagnosis,
+        observations: c.observations,
+        doctorNotes: c.doctorNotes,
+        medicines: c.prescriptions.flatMap(rx => rx.items) as PrintMedItem[],
+      });
+      printDocument(html);
+    } finally {
+      setPrintingId(null);
+    }
+  }
+
+  function printInvoiceReceipt(inv: InvoiceRecord) {
+    setPrintingId(inv.id);
+    try {
+      const visit = visits.find(v => v.id === inv.appointmentId);
+      const html = generateReceiptHtml({
+        tenant: tenantProfile ?? { name: 'Hospital' },
+        receiptNo: inv.invoiceNumber,
+        date: inv.paidAt || inv.invoiceDate,
+        patient: {
+          firstName: patient.firstName,
+          lastName: patient.lastName || '',
+          uhid: patient.uhid,
+          phone: patient.phone || '',
+        },
+        doctor: {
+          firstName: visit?.doctor?.firstName ?? '—',
+          lastName: visit?.doctor?.lastName ?? '',
+        },
+        department: visit?.department?.name,
+        amount: parseFloat(inv.totalAmount),
+        paymentMethod: inv.paymentMethod || 'CASH',
+        tokenNumber: visit?.tokenNumber ?? 0,
+      });
+      printDocument(html);
+    } finally {
+      setPrintingId(null);
+    }
+  }
+
+  function printFullReport() {
+    setPrintingReport(true);
+    try {
+      const html = generatePatientReportHtml({
+        tenant: tenantProfile ?? { name: 'Hospital' },
+        patient: {
+          firstName: patient.firstName,
+          lastName: patient.lastName || '',
+          uhid: patient.uhid,
+          phone: patient.phone,
+          dob: patient.dob,
+          gender: patient.gender,
+          bloodGroup: patient.bloodGroup,
+        },
+        consultations: consultations.map(c => ({
+          id: c.id,
+          date: c.appointment.registeredAt,
+          doctor: c.doctor,
+          visitType: c.appointment.visitType,
+          chiefComplaint: c.appointment.chiefComplaint,
+          diagnosis: c.diagnosis,
+          observations: c.observations,
+          vitals: {
+            bpSystolic: c.bpSystolic,
+            bpDiastolic: c.bpDiastolic,
+            pulseRate: c.pulseRate,
+            temperature: c.temperature ? Number(c.temperature) : undefined,
+            spo2: c.spo2,
+            weightKg: c.weightKg ? Number(c.weightKg) : undefined,
+            heightCm: c.heightCm ? Number(c.heightCm) : undefined,
+          },
+          medicines: c.prescriptions.flatMap(rx => rx.items) as PrintMedItem[],
+          labOrders: (c.labOrders || []).map(o => ({
+            orderNumber: o.orderNumber,
+            status: o.status,
+            items: (o.items || []).map(it => ({
+              name: it.labTest?.name ?? '',
+              result: it.result,
+              unit: it.unit,
+              flag: it.flag,
+            })),
+          })),
+        })),
+        invoices: invoices.map(inv => ({
+          invoiceNumber: inv.invoiceNumber,
+          date: inv.invoiceDate,
+          amount: parseFloat(inv.totalAmount),
+          paymentStatus: inv.paymentStatus,
+          paymentMethod: inv.paymentMethod,
+        })),
+        generatedAt: new Date().toISOString(),
+      });
+      printDocument(html);
+    } finally {
+      setPrintingReport(false);
+    }
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────────────────────
+
+  const tabCls = (t: Tab) =>
+    `px-3 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+      tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
     }`;
 
   const patAge = age(patient.dob);
+  const paidTotal = invoices
+    .filter(i => i.paymentStatus === 'PAID')
+    .reduce((s, i) => s + parseFloat(i.totalAmount), 0);
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" onClick={onClose} />
 
       {/* Drawer */}
       <div className="fixed right-0 top-0 h-full z-50 w-full max-w-2xl bg-white shadow-2xl flex flex-col">
@@ -170,9 +400,7 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                 {patient.firstName?.[0]}{patient.lastName?.[0] || ''}
               </div>
               <div>
-                <h2 className="text-base font-bold text-gray-900">
-                  {patient.firstName} {patient.lastName}
-                </h2>
+                <h2 className="text-base font-bold text-gray-900">{patient.firstName} {patient.lastName}</h2>
                 <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                   <span className="text-xs font-mono text-blue-600 font-medium">{patient.uhid}</span>
                   {patAge && <span className="text-xs text-gray-500">{patAge}</span>}
@@ -182,18 +410,30 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                   {patient.bloodGroup && (
                     <span className="text-xs bg-red-50 text-red-600 px-1.5 py-0.5 rounded font-medium">{patient.bloodGroup}</span>
                   )}
-                  {patient.phone && (
-                    <span className="text-xs text-gray-400">{patient.phone}</span>
-                  )}
+                  {patient.phone && <span className="text-xs text-gray-400">{patient.phone}</span>}
                 </div>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-2xl leading-none mt-1 flex-shrink-0"
-            >
-              &times;
-            </button>
+            <div className="flex items-center gap-2">
+              {!loading && (consultations.length > 0 || invoices.length > 0) && (
+                <button
+                  onClick={printFullReport}
+                  disabled={printingReport}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                  title="Print full patient report"
+                >
+                  {printingReport ? (
+                    <span className="w-3 h-3 border-2 border-gray-400 border-t-blue-600 rounded-full animate-spin" />
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                  )}
+                  Full Report
+                </button>
+              )}
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">
+                &times;
+              </button>
+            </div>
           </div>
 
           {/* Stats row */}
@@ -201,11 +441,19 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
             <div className="flex gap-0 px-6 pb-3">
               <div className="text-center pr-6 border-r border-gray-200">
                 <p className="text-lg font-bold text-gray-900">{visits.length}</p>
-                <p className="text-xs text-gray-400">Total Visits</p>
+                <p className="text-xs text-gray-400">Visits</p>
               </div>
               <div className="text-center px-6 border-r border-gray-200">
                 <p className="text-lg font-bold text-gray-900">{consultations.length}</p>
                 <p className="text-xs text-gray-400">Consultations</p>
+              </div>
+              <div className="text-center px-6 border-r border-gray-200">
+                <p className="text-lg font-bold text-gray-900">{medicationHistory.length}</p>
+                <p className="text-xs text-gray-400">Medications</p>
+              </div>
+              <div className="text-center px-6 border-r border-gray-200">
+                <p className="text-lg font-bold text-gray-900">{invoices.length}</p>
+                <p className="text-xs text-gray-400">Invoices</p>
               </div>
               <div className="text-center px-6">
                 <p className={`text-lg font-bold ${pendingFollowUps.length > 0 ? 'text-orange-500' : 'text-gray-900'}`}>
@@ -223,6 +471,12 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
             </button>
             <button className={tabCls('consultations')} onClick={() => setTab('consultations')}>
               Consultations {consultations.length > 0 && `(${consultations.length})`}
+            </button>
+            <button className={tabCls('medications')} onClick={() => setTab('medications')}>
+              Medications {medicationHistory.length > 0 && `(${medicationHistory.length})`}
+            </button>
+            <button className={tabCls('billing')} onClick={() => setTab('billing')}>
+              Billing {invoices.length > 0 && `(${invoices.length})`}
             </button>
             <button className={tabCls('followups')} onClick={() => setTab('followups')}>
               Follow-ups {allFollowUps.length > 0 && `(${allFollowUps.length})`}
@@ -308,55 +562,61 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                       .map(c => (
                         <div key={c.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                          {/* Consult header */}
+                          {/* Header */}
                           <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
                             <div>
                               <span className="text-sm font-semibold text-gray-900">{fmtDate(c.appointment.registeredAt)}</span>
                               <span className="text-xs text-gray-400 ml-2">Dr. {c.doctor.firstName} {c.doctor.lastName}</span>
                             </div>
-                            <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{c.appointment.visitType}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{c.appointment.visitType}</span>
+                              <button
+                                onClick={() => printConsultation(c)}
+                                disabled={printingId === c.id}
+                                className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                                title="Print prescription"
+                              >
+                                {printingId === c.id ? (
+                                  <span className="w-3 h-3 border border-gray-400 border-t-blue-600 rounded-full animate-spin" />
+                                ) : (
+                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                                )}
+                                Print Rx
+                              </button>
+                            </div>
                           </div>
 
                           <div className="p-4 space-y-3">
-                            {/* Chief complaint */}
                             {c.appointment.chiefComplaint && (
                               <p className="text-sm text-gray-600">
                                 <span className="font-medium text-gray-500">Complaint:</span> {c.appointment.chiefComplaint}
                               </p>
                             )}
 
-                            {/* Vitals mini-bar */}
-                            {(c.bpSystolic || c.pulseRate || c.temperature || c.spo2) && (
+                            {/* Vitals */}
+                            {(c.bpSystolic || c.pulseRate || c.temperature || c.spo2 || c.weightKg) && (
                               <div className="flex flex-wrap gap-2">
                                 {c.bpSystolic && c.bpDiastolic && (
-                                  <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
-                                    BP {c.bpSystolic}/{c.bpDiastolic}
-                                  </span>
+                                  <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">BP {c.bpSystolic}/{c.bpDiastolic}</span>
                                 )}
                                 {c.pulseRate && (
-                                  <span className="text-xs bg-pink-50 text-pink-700 px-2 py-1 rounded">
-                                    Pulse {c.pulseRate}bpm
-                                  </span>
+                                  <span className="text-xs bg-pink-50 text-pink-700 px-2 py-1 rounded">Pulse {c.pulseRate}bpm</span>
                                 )}
                                 {c.temperature && (
-                                  <span className="text-xs bg-orange-50 text-orange-700 px-2 py-1 rounded">
-                                    Temp {Number(c.temperature)}°C
-                                  </span>
+                                  <span className="text-xs bg-orange-50 text-orange-700 px-2 py-1 rounded">Temp {Number(c.temperature)}°C</span>
                                 )}
                                 {c.spo2 && (
-                                  <span className="text-xs bg-teal-50 text-teal-700 px-2 py-1 rounded">
-                                    SpO2 {c.spo2}%
-                                  </span>
+                                  <span className="text-xs bg-teal-50 text-teal-700 px-2 py-1 rounded">SpO2 {c.spo2}%</span>
                                 )}
                                 {c.bmi && (
-                                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                                    BMI {Number(c.bmi)}
-                                  </span>
+                                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">BMI {Number(c.bmi)}</span>
+                                )}
+                                {c.weightKg && (
+                                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">{Number(c.weightKg)}kg</span>
                                 )}
                               </div>
                             )}
 
-                            {/* Diagnosis */}
                             {c.diagnosis && (
                               <div>
                                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Diagnosis</p>
@@ -364,7 +624,6 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                               </div>
                             )}
 
-                            {/* Observations */}
                             {c.observations && (
                               <div>
                                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Observations</p>
@@ -372,12 +631,12 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                               </div>
                             )}
 
-                            {/* Prescription */}
-                            {c.prescriptions?.[0]?.items?.length > 0 && (
+                            {/* All prescription sets */}
+                            {c.prescriptions.filter(rx => rx.items.length > 0).length > 0 && (
                               <div>
                                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Prescription</p>
                                 <div className="space-y-1.5">
-                                  {c.prescriptions[0].items.map((m, i) => (
+                                  {c.prescriptions.flatMap(rx => rx.items).map((m, i) => (
                                     <div key={i} className="flex items-start gap-2 text-sm">
                                       <span className="text-gray-400 w-4 flex-shrink-0">{i + 1}.</span>
                                       <div>
@@ -393,9 +652,154 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                                 </div>
                               </div>
                             )}
+
+                            {/* Lab orders */}
+                            {c.labOrders?.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Lab Tests</p>
+                                <div className="space-y-1.5">
+                                  {c.labOrders.map(o => (
+                                    <div key={o.id} className="bg-gray-50 rounded-lg p-2">
+                                      <div className="flex items-center justify-between mb-1">
+                                        <span className="text-xs font-mono text-gray-600">{o.orderNumber}</span>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${o.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                          {o.status.replace(/_/g, ' ')}
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {o.items?.map((item, idx) => (
+                                          <span key={idx} className={`text-xs px-2 py-0.5 rounded ${item.result ? 'bg-teal-50 text-teal-800' : 'bg-gray-100 text-gray-500'}`}>
+                                            {item.labTest?.name}
+                                            {item.result ? `: ${item.result} ${item.unit ?? ''}`.trim() : ''}
+                                            {item.flag && item.flag !== 'NORMAL' ? ' ⚠' : ''}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))
+                  )}
+                </div>
+              )}
+
+              {/* ── Medications ── */}
+              {tab === 'medications' && (
+                <div>
+                  {medicationHistory.length === 0 ? (
+                    <div className="text-center text-gray-400 py-12">
+                      <p className="text-3xl mb-2">💊</p>
+                      <p>No medications on record</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-400 mb-3">
+                        Aggregated across all consultations — sorted by most recently prescribed.
+                        Repeated prescriptions show the latest dosage and cumulative count.
+                      </p>
+                      <div className="space-y-2">
+                        {medicationHistory.map((med, i) => (
+                          <div key={i} className="flex items-start justify-between bg-white border border-gray-200 rounded-xl px-4 py-3 hover:border-blue-100 transition-colors">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-semibold text-gray-900">{med.medicineName}</p>
+                                {med.count > 1 && (
+                                  <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
+                                    ×{med.count} times
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {med.dosage} · {med.frequency} · {med.duration}
+                                {med.instructions && <span className="text-gray-400"> · {med.instructions}</span>}
+                              </p>
+                            </div>
+                            <div className="text-right flex-shrink-0 ml-3">
+                              <p className="text-xs text-gray-500">{fmtDate(med.lastDate)}</p>
+                              <p className="text-xs text-gray-400">Dr. {med.lastDoctor.firstName} {med.lastDoctor.lastName}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ── Billing ── */}
+              {tab === 'billing' && (
+                <div>
+                  {invoices.length === 0 ? (
+                    <div className="text-center text-gray-400 py-12">
+                      <p className="text-3xl mb-2">🧾</p>
+                      <p>No billing records found</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-xs text-gray-400">{invoices.length} invoice{invoices.length !== 1 ? 's' : ''}</p>
+                        {paidTotal > 0 && (
+                          <p className="text-xs font-semibold text-gray-700">
+                            Total paid: <span className="text-green-700">₹{paidTotal.toLocaleString('en-IN')}</span>
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {invoices.map(inv => {
+                          const isPaid = inv.paymentStatus === 'PAID';
+                          const isRefunded = inv.paymentStatus === 'REFUNDED';
+                          const statusCls = isPaid
+                            ? 'bg-green-100 text-green-700'
+                            : isRefunded
+                            ? 'bg-gray-100 text-gray-500'
+                            : 'bg-yellow-100 text-yellow-700';
+                          const visit = visits.find(v => v.id === inv.appointmentId);
+
+                          return (
+                            <div key={inv.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3 hover:border-blue-100 transition-colors">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-xs font-mono font-medium text-blue-700">{inv.invoiceNumber}</p>
+                                  <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                                    {inv.invoiceType.replace(/_/g, ' ')}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  {fmtDate(inv.invoiceDate)}
+                                  {visit && <span> · Dr. {visit.doctor.firstName} {visit.doctor.lastName}</span>}
+                                  {inv.paymentMethod && <span> · {inv.paymentMethod}</span>}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-gray-900">₹{parseFloat(inv.totalAmount).toLocaleString('en-IN')}</p>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusCls}`}>{inv.paymentStatus}</span>
+                                </div>
+                                {isPaid && (
+                                  <button
+                                    onClick={() => printInvoiceReceipt(inv)}
+                                    disabled={printingId === inv.id}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                                    title="Print receipt"
+                                  >
+                                    {printingId === inv.id ? (
+                                      <span className="w-3 h-3 border border-gray-400 border-t-blue-600 rounded-full animate-spin" />
+                                    ) : (
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                                    )}
+                                    Receipt
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
                   )}
                 </div>
               )}
@@ -445,6 +849,7 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                   )}
                 </div>
               )}
+
             </div>
           )}
         </div>

@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { patientApi, appointmentApi, billingApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
+import { generateReceiptHtml, printDocument } from '@/lib/print';
 import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -292,7 +293,7 @@ type Tab = 'overview' | 'history' | 'billing';
 export default function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, tenantProfile } = useAuthStore();
   const canEdit = ['ADMIN', 'RECEPTIONIST'].includes(user?.role ?? '');
 
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -305,6 +306,7 @@ export default function PatientDetailPage() {
   const [editModal, setEditModal] = useState(false);
   const [apptModal, setApptModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(null);
 
   const fetchPatient = useCallback(async () => {
     try {
@@ -335,10 +337,40 @@ export default function PatientDetailPage() {
   }, [id]);
 
   useEffect(() => { fetchPatient(); }, [fetchPatient]);
-  useEffect(() => { if (tab === 'history') fetchAppointments(); }, [tab, fetchAppointments]);
+  useEffect(() => { if (tab === 'history' || tab === 'billing') fetchAppointments(); }, [tab, fetchAppointments]);
   useEffect(() => { if (tab === 'billing') fetchInvoices(); }, [tab, fetchInvoices]);
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 4000); }
+
+  function printInvoiceReceipt(inv: Invoice) {
+    if (!patient) return;
+    setPrintingReceiptId(inv.id);
+    try {
+      const apptForInvoice = appointments.find(a => (inv as any).appointmentId === a.id);
+      const html = generateReceiptHtml({
+        tenant: tenantProfile ?? { name: 'Hospital' },
+        receiptNo: inv.invoiceNumber,
+        date: inv.paidAt || inv.invoiceDate,
+        patient: {
+          firstName: patient.firstName,
+          lastName: patient.lastName || '',
+          uhid: patient.uhid,
+          phone: patient.phone,
+        },
+        doctor: {
+          firstName: apptForInvoice?.doctor?.firstName ?? '—',
+          lastName: apptForInvoice?.doctor?.lastName ?? '',
+        },
+        department: apptForInvoice?.department?.name,
+        amount: parseFloat(inv.totalAmount),
+        paymentMethod: inv.paymentMethod || 'CASH',
+        tokenNumber: apptForInvoice?.tokenNumber ?? 0,
+      });
+      printDocument(html);
+    } finally {
+      setPrintingReceiptId(null);
+    }
+  }
 
   if (loadingPatient) {
     return <div className="flex items-center justify-center h-64 text-gray-400">Loading patient…</div>;
@@ -492,6 +524,7 @@ export default function PatientDetailPage() {
                   <th className="px-4 py-3 text-right font-medium text-gray-500">Amount</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Method</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -517,6 +550,22 @@ export default function PatientDetailPage() {
                           {inv.paymentStatus}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        {inv.paymentStatus === 'PAID' && (
+                          <button
+                            onClick={() => printInvoiceReceipt(inv)}
+                            disabled={printingReceiptId === inv.id}
+                            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            {printingReceiptId === inv.id ? (
+                              <span className="w-3 h-3 border border-gray-300 border-t-blue-600 rounded-full animate-spin" />
+                            ) : (
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                            )}
+                            Receipt
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -530,7 +579,7 @@ export default function PatientDetailPage() {
                       .reduce((sum, i) => sum + parseFloat(i.totalAmount), 0)
                       .toLocaleString('en-IN')}
                   </td>
-                  <td colSpan={2} />
+                  <td colSpan={3} />
                 </tr>
               </tfoot>
             </table>

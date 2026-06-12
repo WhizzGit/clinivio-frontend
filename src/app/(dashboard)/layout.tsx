@@ -4,9 +4,10 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/auth.store';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
+import { iamApi } from '@/lib/api';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, tenantProfile, setTenantProfile } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -19,6 +20,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.replace('/pharmacy');
     }
   }, [isAuthenticated, user, router, pathname]);
+
+  // Fetch hospital profile once per session — shared by billing, consultation, and pharmacy print flows
+  useEffect(() => {
+    if (!user?.tenantId || tenantProfile) return;
+    iamApi.get(`/tenants/${user.tenantId}`)
+      .then(r => setTenantProfile(r.data))
+      .catch(err => console.warn('[layout] tenant profile fetch failed:', err?.message));
+  }, [user?.tenantId]);
 
   if (!isAuthenticated) return null;
 

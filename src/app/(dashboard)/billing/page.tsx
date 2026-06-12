@@ -1,9 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { appointmentApi, iamApi, billingApi } from '@/lib/api';
+import { appointmentApi, billingApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { PatientHistoryDrawer } from '@/components/PatientHistoryDrawer';
-import { generateReceiptHtml, printDocument, TenantProfile } from '@/lib/print';
+import { generateReceiptHtml, printDocument } from '@/lib/print';
 import { DismissModal, type DismissTarget } from '@/components/DismissModal';
 
 interface ActivePatient {
@@ -31,7 +31,7 @@ interface PendingAdmissionInvoice {
 const PAYMENT_METHODS = ['CASH', 'UPI', 'CARD', 'INSURANCE', 'NEFT'];
 
 export default function BillingCounterPage() {
-  const { user } = useAuthStore();
+  const { user, tenantProfile } = useAuthStore();
   const [patients, setPatients]     = useState<ActivePatient[]>([]);
   const [loading, setLoading]       = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -41,7 +41,6 @@ export default function BillingCounterPage() {
   const [processing, setProcessing] = useState(false);
   const [search, setSearch]         = useState('');
   const [historyPatient, setHistoryPatient] = useState<ActivePatient['patient'] | null>(null);
-  const [tenantProfile, setTenantProfile] = useState<TenantProfile | null>(null);
   const [lastReceipt, setLastReceipt] = useState<{ patient: ActivePatient; amount: number; method: string } | null>(null);
   const [pendingAdmissions, setPendingAdmissions] = useState<PendingAdmissionInvoice[]>([]);
   const [selectedAdmission, setSelectedAdmission] = useState<PendingAdmissionInvoice | null>(null);
@@ -50,12 +49,6 @@ export default function BillingCounterPage() {
   const [admissionProcessing, setAdmissionProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<'opd' | 'ipd'>('opd');
   const [dismissTarget, setDismissTarget] = useState<DismissTarget | null>(null);
-
-  useEffect(() => {
-    if (user?.tenantId) {
-      iamApi.get(`/tenants/${user.tenantId}`).then(r => setTenantProfile(r.data)).catch(() => {});
-    }
-  }, [user?.tenantId]);
 
   const fetchPending = useCallback(async () => {
     try {

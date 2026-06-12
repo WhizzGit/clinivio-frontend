@@ -1,9 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { appointmentApi, patientApi, iamApi } from '@/lib/api';
+import { appointmentApi, patientApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
-import { generatePrescriptionHtml, printDocument, TenantProfile } from '@/lib/print';
+import { generatePrescriptionHtml, printDocument } from '@/lib/print';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -48,10 +48,13 @@ interface Consultation {
 }
 
 interface PastConsultation {
-  id: string; createdAt: string; diagnosis?: string; observations?: string;
+  id: string; createdAt: string; diagnosis?: string; observations?: string; doctorNotes?: string;
+  bpSystolic?: number; bpDiastolic?: number; pulseRate?: number; temperature?: number;
+  spo2?: number; rbsMgDl?: number; weightKg?: number; heightCm?: number; bmi?: number;
   appointment: { visitType: string; chiefComplaint?: string; registeredAt: string };
   doctor: { firstName: string; lastName: string };
   prescriptions: Array<{ items: MedItem[] }>;
+  labOrders?: Array<{ id: string; orderNumber: string; status: string; items: Array<{ id?: string; labTest: { name: string; code: string }; result?: string; unit?: string; flag?: string }> }>;
 }
 
 interface LabTestOption {
@@ -117,11 +120,10 @@ function emptyMed(): MedItem {
 export default function ConsultationPage() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, tenantProfile } = useAuthStore();
 
   const [appt, setAppt]                   = useState<Appointment | null>(null);
   const [consultation, setConsultation]   = useState<Consultation>({});
-  const [tenantProfile, setTenantProfile] = useState<TenantProfile | null>(null);
   const [printing, setPrinting]           = useState(false);
   const [vitals, setVitals]               = useState<Vitals>({});
   const [observations, setObservations] = useState('');
@@ -138,6 +140,7 @@ export default function ConsultationPage() {
   const [tab, setTab] = useState<'vitals' | 'prescription' | 'labtests' | 'followup' | 'history'>('vitals');
   const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [printingHistoryId, setPrintingHistoryId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [labTests, setLabTests] = useState<LabTestOption[]>([]);
@@ -177,10 +180,6 @@ export default function ConsultationPage() {
           // No consultation yet — will be created on first save
         }
 
-        // Fetch tenant profile for print header (best-effort, don't block on failure)
-        if (a.patient?.id) {
-          iamApi.get(`/tenants/${user?.tenantId}`).then(r => setTenantProfile(r.data)).catch(() => {});
-        }
       } catch {
         setLoadError('Could not load appointment details');
       }
@@ -347,6 +346,48 @@ export default function ConsultationPage() {
     });
     printDocument(html);
     setPrinting(false);
+  }
+
+  function printHistoryRx(h: PastConsultation) {
+    if (!appt) return;
+    setPrintingHistoryId(h.id);
+    try {
+      const html = generatePrescriptionHtml({
+        tenant: tenantProfile ?? { name: 'Hospital' },
+        doctor: { firstName: h.doctor.firstName, lastName: h.doctor.lastName },
+        patient: {
+          firstName: appt.patient.firstName,
+          lastName: appt.patient.lastName,
+          uhid: appt.patient.uhid,
+          phone: appt.patient.phone,
+          dob: appt.patient.dob,
+          gender: appt.patient.gender,
+          bloodGroup: appt.patient.bloodGroup,
+        },
+        appointment: {
+          chiefComplaint: h.appointment.chiefComplaint,
+          scheduledAt: h.appointment.registeredAt,
+        },
+        vitals: {
+          bpSystolic: h.bpSystolic,
+          bpDiastolic: h.bpDiastolic,
+          pulseRate: h.pulseRate,
+          temperature: h.temperature ? Number(h.temperature) : undefined,
+          spo2: h.spo2,
+          rbsMgDl: h.rbsMgDl,
+          weightKg: h.weightKg ? Number(h.weightKg) : undefined,
+          heightCm: h.heightCm ? Number(h.heightCm) : undefined,
+          bmi: h.bmi ? Number(h.bmi) : undefined,
+        },
+        diagnosis: h.diagnosis,
+        observations: h.observations,
+        doctorNotes: h.doctorNotes,
+        medicines: h.prescriptions.flatMap(rx => rx.items),
+      });
+      printDocument(html);
+    } finally {
+      setPrintingHistoryId(null);
+    }
   }
 
   // suppresses unused-read hint for consultation — used in hydrate + future features
@@ -1025,60 +1066,76 @@ export default function ConsultationPage() {
             </div>
           ) : (
             history.map((h) => (
-              <div key={h.id} className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="flex items-start justify-between mb-3">
+              <div key={h.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
                   <div>
                     <p className="text-sm font-semibold text-gray-900">
                       {new Date(h.appointment.registeredAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                     </p>
                     <p className="text-xs text-gray-400">Dr. {h.doctor.firstName} {h.doctor.lastName} · {h.appointment.visitType}</p>
                   </div>
-                  {h.appointment.chiefComplaint && (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{h.appointment.chiefComplaint}</span>
+                  <div className="flex items-center gap-2">
+                    {h.appointment.chiefComplaint && (
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{h.appointment.chiefComplaint}</span>
+                    )}
+                    <button
+                      onClick={() => printHistoryRx(h)}
+                      disabled={printingHistoryId === h.id}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {printingHistoryId === h.id ? (
+                        <span className="w-3 h-3 border border-gray-400 border-t-blue-500 rounded-full animate-spin" />
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                      )}
+                      Print Rx
+                    </button>
+                  </div>
+                </div>
+                <div className="p-4">
+                  {h.diagnosis && (
+                    <p className="text-sm text-gray-700 mb-2"><span className="font-medium text-gray-500">Dx:</span> {h.diagnosis}</p>
+                  )}
+                  {h.observations && (
+                    <p className="text-sm text-gray-500 mb-2 line-clamp-2">{h.observations}</p>
+                  )}
+                  {h.prescriptions.flatMap(rx => rx.items).length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <p className="text-xs font-medium text-gray-500 mb-1.5">Prescribed</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {h.prescriptions.flatMap(rx => rx.items).map((m, i) => (
+                          <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
+                            {m.medicineName} {m.dosage} · {m.frequency} · {m.duration}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {h.labOrders && h.labOrders.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <p className="text-xs font-medium text-gray-500 mb-1.5">Lab Tests</p>
+                      <div className="space-y-1.5">
+                        {h.labOrders.map((o) => (
+                          <div key={o.id} className="bg-gray-50 rounded-lg p-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-mono text-gray-600">{o.orderNumber}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${o.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{o.status.replace(/_/g, ' ')}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {o.items?.map((item, idx) => (
+                                <span key={idx} className={`text-xs px-2 py-0.5 rounded ${item.result ? 'bg-teal-50 text-teal-800' : 'bg-gray-100 text-gray-500'}`}>
+                                  {item.labTest?.name}
+                                  {item.result ? `: ${item.result} ${item.unit ?? ''}`.trim() : ''}
+                                  {item.flag && item.flag !== 'NORMAL' ? ' ⚠' : ''}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-                {h.diagnosis && (
-                  <p className="text-sm text-gray-700 mb-2"><span className="font-medium text-gray-500">Dx:</span> {h.diagnosis}</p>
-                )}
-                {h.observations && (
-                  <p className="text-sm text-gray-500 mb-2 line-clamp-2">{h.observations}</p>
-                )}
-                {h.prescriptions?.[0]?.items?.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-100">
-                    <p className="text-xs font-medium text-gray-500 mb-1.5">Prescribed</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {h.prescriptions[0].items.map((m: any, i: number) => (
-                        <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
-                          {m.medicineName} {m.dosage} · {m.frequency} · {m.duration}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {(h as any).labOrders?.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-100">
-                    <p className="text-xs font-medium text-gray-500 mb-1.5">Lab Tests</p>
-                    <div className="space-y-1.5">
-                      {(h as any).labOrders.map((o: any) => (
-                        <div key={o.id} className="bg-gray-50 rounded-lg p-2">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-mono text-gray-600">{o.orderNumber}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${o.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{o.status.replace(/_/g, ' ')}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {o.items?.map((item: any) => (
-                              <span key={item.id} className={`text-xs px-2 py-0.5 rounded ${item.result ? 'bg-teal-50 text-teal-800' : 'bg-gray-100 text-gray-500'}`}>
-                                {item.labTest?.name}
-                                {item.result ? `: ${item.result} ${item.unit ?? ''}`.trim() : ''}
-                                {item.flag && item.flag !== 'NORMAL' ? ` ⚠` : ''}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             ))
           )}
