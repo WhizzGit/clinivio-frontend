@@ -4,6 +4,7 @@ import { appointmentApi, iamApi, billingApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { PatientHistoryDrawer } from '@/components/PatientHistoryDrawer';
 import { generateReceiptHtml, printDocument, TenantProfile } from '@/lib/print';
+import { DismissModal, type DismissTarget } from '@/components/DismissModal';
 
 interface ActivePatient {
   id: string;
@@ -48,6 +49,7 @@ export default function BillingCounterPage() {
   const [admissionMethod, setAdmissionMethod] = useState('CASH');
   const [admissionProcessing, setAdmissionProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<'opd' | 'ipd'>('opd');
+  const [dismissTarget, setDismissTarget] = useState<DismissTarget | null>(null);
 
   useEffect(() => {
     if (user?.tenantId) {
@@ -163,6 +165,17 @@ export default function BillingCounterPage() {
 
   return (
     <div className="flex gap-6 h-full">
+      {dismissTarget && (
+        <DismissModal
+          appointment={dismissTarget}
+          onClose={() => setDismissTarget(null)}
+          onDismissed={() => {
+            setDismissTarget(null);
+            if (selected?.id === dismissTarget.id) setSelected(null);
+            fetchPending();
+          }}
+        />
+      )}
       {historyPatient && (
         <PatientHistoryDrawer patient={historyPatient} onClose={() => setHistoryPatient(null)} />
       )}
@@ -258,8 +271,12 @@ export default function BillingCounterPage() {
                 {p.department && <p className="text-xs text-gray-500 mt-2">{p.department.icon} {p.department.name}{p.chiefComplaint && ` · ${p.chiefComplaint}`}</p>}
                 <div className="flex items-center justify-between mt-1">
                   <p className="text-xs text-gray-400">Registered {new Date(p.registeredAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</p>
-                  <button type="button" onClick={e => { e.stopPropagation(); setHistoryPatient(p.patient); }}
-                    className="text-xs text-purple-600 hover:text-purple-800 font-medium px-2 py-0.5 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors">History</button>
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={e => { e.stopPropagation(); setHistoryPatient(p.patient); }}
+                      className="text-xs text-purple-600 hover:text-purple-800 font-medium px-2 py-0.5 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors">History</button>
+                    <button type="button" onClick={e => { e.stopPropagation(); setDismissTarget(p); }}
+                      className="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-0.5 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">Dismiss</button>
+                  </div>
                 </div>
               </button>
             ))}
@@ -330,7 +347,10 @@ export default function BillingCounterPage() {
                 className="w-full py-3 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors">
                 {processing ? 'Processing…' : `Confirm Payment · ₹${amount || '0'}`}
               </button>
-              <button onClick={() => setSelected(null)} className="w-full py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setSelected(null)} className="flex-1 py-2 text-sm text-gray-500 hover:text-gray-700">Deselect</button>
+                <button onClick={() => setDismissTarget(selected)} className="flex-1 py-2 text-sm text-red-500 hover:text-red-700 font-medium">Dismiss patient</button>
+              </div>
             </div>
           ))}
 

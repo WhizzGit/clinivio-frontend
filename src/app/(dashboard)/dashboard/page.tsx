@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { appointmentApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
+import { DismissModal, type DismissTarget } from '@/components/DismissModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ActivePatient {
@@ -241,6 +242,7 @@ export default function ActivePatientBoard() {
   const [filterVisit, setFilterVisit] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [counts, setCounts] = useState({ registered: 0, confirmed: 0, inProgress: 0 });
+  const [dismissTarget, setDismissTarget] = useState<DismissTarget | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchActive = useCallback(async () => {
@@ -281,6 +283,13 @@ export default function ActivePatientBoard() {
 
   return (
     <div>
+      {dismissTarget && (
+        <DismissModal
+          appointment={dismissTarget}
+          onClose={() => setDismissTarget(null)}
+          onDismissed={() => { setDismissTarget(null); fetchActive(); }}
+        />
+      )}
       {isAdmin && <AdminAnalytics />}
 
       <div className="flex items-center justify-between mb-5">
@@ -344,7 +353,7 @@ export default function ActivePatientBoard() {
                 <span className="text-sm text-gray-400">({group.length})</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {group.map(p => <PatientCard key={p.id} patient={p} />)}
+                {group.map(p => <PatientCard key={p.id} patient={p} onDismiss={setDismissTarget} />)}
               </div>
             </div>
           ))}
@@ -354,7 +363,7 @@ export default function ActivePatientBoard() {
   );
 }
 
-function PatientCard({ patient: p }: { patient: ActivePatient }) {
+function PatientCard({ patient: p, onDismiss }: { patient: ActivePatient; onDismiss: (t: DismissTarget) => void }) {
   const router = useRouter();
   const patientAge = age(p.patient.dob);
   const canOpenConsultation = ['CHECKED_IN', 'IN_PROGRESS'].includes(p.status);
@@ -375,9 +384,18 @@ function PatientCard({ patient: p }: { patient: ActivePatient }) {
             </p>
           </div>
         </div>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${p.visitType === 'IPD' ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'}`}>
-          {p.visitType}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${p.visitType === 'IPD' ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'}`}>
+            {p.visitType}
+          </span>
+          <button
+            onClick={e => { e.stopPropagation(); onDismiss(p); }}
+            title="Dismiss appointment"
+            className="w-6 h-6 flex items-center justify-center rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors text-base leading-none"
+          >
+            ×
+          </button>
+        </div>
       </div>
       {p.department && (
         <div className="flex items-center gap-1.5 mb-2">

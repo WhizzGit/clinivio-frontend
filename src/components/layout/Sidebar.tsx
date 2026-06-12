@@ -22,6 +22,7 @@ const navItems = [
   { href: '/departments', label: 'Departments', icon: '🏷️', roles: ['ADMIN'] },
   { href: '/staff', label: 'Staff & Passwords', icon: '👤', roles: ['ADMIN'] },
   { href: '/settings', label: 'Settings', icon: '⚙️', roles: ['SUPER_ADMIN', 'ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'PHARMACIST'] },
+  { href: '/audit', label: 'Audit Trail', icon: '🔍', roles: ['ADMIN', 'SUPER_ADMIN'] },
 ];
 
 export function Sidebar() {
