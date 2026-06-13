@@ -11,6 +11,7 @@ export type UserRole =
 
 export interface User {
   id: string;
+  staffId: string | null;
   email: string;
   firstName: string;
   lastName: string;

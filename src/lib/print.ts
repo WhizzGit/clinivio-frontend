@@ -443,6 +443,128 @@ table.billing td{padding:4px 8px;border-bottom:0.5pt solid #e5e7eb}
 </body></html>`;
 }
 
+// ── Lab Report ────────────────────────────────────────────────────────────────
+
+export interface LabReportPrintData {
+  tenant: TenantProfile;
+  orderNumber: string;
+  reportDate?: string;
+  patient: { firstName: string; lastName: string; uhid: string; dob?: string; gender?: string; phone: string };
+  doctor: { firstName: string; lastName: string; qualification?: string };
+  priority: string;
+  sampleType?: string;
+  collectedAt?: string;
+  completedAt?: string;
+  clinicalNotes?: string;
+  items: Array<{
+    name: string;
+    code?: string;
+    category?: string;
+    result: string;
+    unit?: string;
+    normalRange?: string;
+    flag?: 'NORMAL' | 'ABNORMAL' | 'CRITICAL';
+    notes?: string;
+  }>;
+}
+
+export function generateLabReportHtml(d: LabReportPrintData): string {
+  const hasCritical = d.items.some(i => i.flag === 'CRITICAL');
+  const flagColor = (f?: string) => f === 'CRITICAL' ? '#dc2626' : f === 'ABNORMAL' ? '#d97706' : '#16a34a';
+  const flagBg = (f?: string) => f === 'CRITICAL' ? '#fef2f2' : f === 'ABNORMAL' ? '#fffbeb' : '#f0fdf4';
+
+  const rows = d.items.map(item => `
+    <tr style="background:${item.flag === 'CRITICAL' ? '#fef2f2' : item.flag === 'ABNORMAL' ? '#fffbeb' : '#fff'}">
+      <td style="padding:6px 8px;border-bottom:0.5pt solid #e5e7eb">
+        <p style="font-weight:bold;font-size:10pt;margin:0">${item.name}</p>
+        ${item.code ? `<p style="font-size:8pt;color:#666;margin:0">${item.code}${item.category ? ` · ${item.category}` : ''}</p>` : ''}
+      </td>
+      <td style="padding:6px 8px;border-bottom:0.5pt solid #e5e7eb;text-align:center;font-size:11pt;font-weight:bold;color:${flagColor(item.flag)}">
+        ${item.result} ${item.unit ?? ''}
+      </td>
+      <td style="padding:6px 8px;border-bottom:0.5pt solid #e5e7eb;text-align:center;font-size:9pt;color:#555">
+        ${item.normalRange ?? '—'}
+      </td>
+      <td style="padding:6px 8px;border-bottom:0.5pt solid #e5e7eb;text-align:center">
+        ${item.flag ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:8.5pt;font-weight:bold;background:${flagBg(item.flag)};color:${flagColor(item.flag)}">${item.flag}</span>` : '<span style="color:#9ca3af;font-size:8.5pt">—</span>'}
+      </td>
+      <td style="padding:6px 8px;border-bottom:0.5pt solid #e5e7eb;font-size:8.5pt;color:#555;font-style:italic">${item.notes ?? '—'}</td>
+    </tr>`).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Lab Report — ${d.orderNumber}</title>
+<style>${BASE_CSS}</style>
+</head>
+<body>
+<div class="page">
+
+  ${hospitalHeader(d.tenant)}
+
+  <div style="text-align:center;margin:8px 0">
+    <span style="font-size:13pt;font-weight:bold;letter-spacing:1px">LABORATORY REPORT</span>
+    ${hasCritical ? `<br><span style="color:#dc2626;font-size:9pt;font-weight:bold">⚠ Contains Critical Values</span>` : ''}
+  </div>
+
+  <div class="grid2" style="margin-bottom:8px;font-size:10pt">
+    <div>
+      <p><span class="label">Patient: </span><strong>${d.patient.firstName} ${d.patient.lastName}</strong></p>
+      <p><span class="label">UHID: </span><span style="font-family:monospace">${d.patient.uhid}</span>
+         &nbsp;|&nbsp; <span class="label">Age/Sex: </span>${age(d.patient.dob)} / ${d.patient.gender ?? '—'}</p>
+      <p><span class="label">Phone: </span>${d.patient.phone}</p>
+    </div>
+    <div style="text-align:right">
+      <p><span class="label">Order #: </span><strong style="font-family:monospace">${d.orderNumber}</strong></p>
+      <p><span class="label">Priority: </span>${d.priority}</p>
+      <p><span class="label">Ordered by: </span>Dr. ${d.doctor.firstName} ${d.doctor.lastName}${d.doctor.qualification ? `, ${d.doctor.qualification}` : ''}</p>
+      <p><span class="label">Report Date: </span>${fmtDate(d.reportDate ?? d.completedAt)}</p>
+    </div>
+  </div>
+
+  ${(d.sampleType || d.collectedAt || d.completedAt) ? `
+  <div style="background:#f8fafc;border:0.5pt solid #e2e8f0;padding:5px 10px;margin-bottom:8px;font-size:9pt;display:flex;gap:16px;flex-wrap:wrap">
+    ${d.sampleType ? `<span><span class="label">Sample: </span>${d.sampleType}</span>` : ''}
+    ${d.collectedAt ? `<span><span class="label">Collected: </span>${fmtDateTime(d.collectedAt)}</span>` : ''}
+    ${d.completedAt ? `<span><span class="label">Reported: </span>${fmtDateTime(d.completedAt)}</span>` : ''}
+  </div>` : ''}
+
+  ${d.clinicalNotes ? `<p style="font-size:9pt;margin-bottom:8px;background:#eff6ff;border:0.5pt solid #bfdbfe;padding:5px 8px"><span class="label">Clinical Notes: </span>${d.clinicalNotes}</p>` : ''}
+
+  <div class="section-line"></div>
+
+  <table style="width:100%;border-collapse:collapse;margin-top:4px">
+    <thead>
+      <tr style="background:#1a1a1a;color:#fff">
+        <th style="padding:6px 8px;text-align:left;font-size:9pt">Test</th>
+        <th style="padding:6px 8px;text-align:center;font-size:9pt">Result</th>
+        <th style="padding:6px 8px;text-align:center;font-size:9pt">Reference Range</th>
+        <th style="padding:6px 8px;text-align:center;font-size:9pt">Flag</th>
+        <th style="padding:6px 8px;text-align:left;font-size:9pt">Notes</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  ${hasCritical ? `
+  <div style="margin-top:10px;border:1.5pt solid #dc2626;border-radius:4px;padding:8px 12px;background:#fef2f2">
+    <p style="color:#dc2626;font-weight:bold;font-size:10pt">⚠ Critical Value Alert</p>
+    <p style="color:#991b1b;font-size:9pt;margin-top:3px">Immediate physician review required. Please contact your doctor immediately.</p>
+  </div>` : ''}
+
+  <div class="sig-row" style="margin-top:24px">
+    <div></div>
+    <div class="sig-box">Authorised Signatory<br><span style="font-size:8pt">${d.tenant.name}</span></div>
+  </div>
+
+  <div class="footer-note">
+    Computer-generated laboratory report. ${d.tenant.registrationNo ? `Reg: ${d.tenant.registrationNo} |` : ''} Report Date: ${fmtDate(d.reportDate ?? d.completedAt)}
+  </div>
+
+</div>
+<script>window.onload=function(){window.print()}</script>
+</body></html>`;
+}
+
 // ── Open in new window and print ─────────────────────────────────────────────
 
 export function printDocument(html: string) {

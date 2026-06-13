@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { appointmentApi, billingApi } from "@/lib/api";
+import { useAuthStore } from "@/store/auth.store";
 import {
   Activity, Stethoscope, Scissors, FileText, ClipboardList,
   ChevronLeft, Plus, X, CheckCircle, AlertCircle, Camera,
@@ -38,6 +39,9 @@ const TABS = [
 export default function IPDDetailPage() {
   const { admissionId } = useParams<{ admissionId: string }>();
   const router = useRouter();
+  const userRole = useAuthStore((s) => s.user?.role);
+  const canDischarge = userRole === "ADMIN" || userRole === "DOCTOR";
+  const canMarkReady = canDischarge || userRole === "NURSE";
   const [admission, setAdmission] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("vitals");
@@ -125,16 +129,18 @@ export default function IPDDetailPage() {
             <p className="text-xs text-gray-500 mt-1 italic">{admission.admissionReason}</p>
           </div>
 
-          {isActive && (
+          {isActive && (canMarkReady || canDischarge) && (
             <div className="flex gap-2 flex-shrink-0">
-              {admission.status !== "READY_FOR_DISCHARGE" && (
+              {canMarkReady && admission.status !== "READY_FOR_DISCHARGE" && (
                 <button onClick={markReadyForDischarge} className="flex items-center gap-1.5 border border-green-300 text-green-700 bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded-lg text-xs font-medium">
                   <CheckCircle className="h-3.5 w-3.5" /> Ready for Discharge
                 </button>
               )}
-              <button onClick={discharge} className="flex items-center gap-1.5 border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg text-xs font-medium">
-                <LogOut className="h-3.5 w-3.5" /> Discharge
-              </button>
+              {canDischarge && (
+                <button onClick={discharge} className="flex items-center gap-1.5 border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg text-xs font-medium">
+                  <LogOut className="h-3.5 w-3.5" /> Discharge
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -163,8 +169,8 @@ export default function IPDDetailPage() {
         {tab === "consultation" && <ConsultationTab admission={admission} onSaved={load} notify={notify} />}
         {tab === "treatments" && <TreatmentsTab admission={admission} onSaved={load} notify={notify} isActive={isActive} />}
         {tab === "procedures" && <ProceduresTab admission={admission} onSaved={load} notify={notify} isActive={isActive} />}
-        {tab === "discharge-advice" && <DischargeAdviceTab admission={admission} onSaved={load} notify={notify} isActive={isActive} />}
-        {tab === "discharge-summary" && <DischargeSummaryTab admission={admission} onSaved={load} notify={notify} isActive={isActive} />}
+        {tab === "discharge-advice" && <DischargeAdviceTab admission={admission} onSaved={load} notify={notify} isActive={isActive} canSave={canDischarge} />}
+        {tab === "discharge-summary" && <DischargeSummaryTab admission={admission} onSaved={load} notify={notify} isActive={isActive} canSave={canDischarge} />}
       </div>
     </div>
   );
@@ -460,7 +466,7 @@ function ProceduresTab({ admission, onSaved, notify, isActive }: any) {
 }
 
 // ─── Discharge Advice Tab ─────────────────────────────────────────────────────
-function DischargeAdviceTab({ admission, onSaved, notify, isActive }: any) {
+function DischargeAdviceTab({ admission, onSaved, notify, isActive, canSave }: any) {
   const existing = admission.dischargeAdvice;
   const [form, setForm] = useState({
     medications: existing?.medications ?? "",
@@ -510,7 +516,7 @@ function DischargeAdviceTab({ admission, onSaved, notify, isActive }: any) {
           <textarea className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} value={form.followUpNotes} onChange={F("followUpNotes")} disabled={!isActive} />
         </div>
       </div>
-      {isActive && (
+      {isActive && canSave && (
         <button onClick={save} disabled={saving} className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"><Save className="h-4 w-4" />{saving ? "Saving…" : "Save Discharge Advice"}</button>
       )}
     </div>
@@ -518,7 +524,7 @@ function DischargeAdviceTab({ admission, onSaved, notify, isActive }: any) {
 }
 
 // ─── Discharge Summary Tab ────────────────────────────────────────────────────
-function DischargeSummaryTab({ admission, onSaved, notify, isActive }: any) {
+function DischargeSummaryTab({ admission, onSaved, notify, isActive, canSave }: any) {
   const existing = admission.dischargeSummary;
   const [form, setForm] = useState({
     finalDiagnosis: existing?.finalDiagnosis ?? "",
@@ -576,7 +582,7 @@ function DischargeSummaryTab({ admission, onSaved, notify, isActive }: any) {
         </div>
       ))}
 
-      {isActive && (
+      {isActive && canSave && (
         <button onClick={save} disabled={saving} className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"><Save className="h-4 w-4" />{saving ? "Saving…" : "Save Discharge Summary"}</button>
       )}
     </div>

@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, FileText, ChevronDown, ChevronUp, Pill, Download } from "lucide-react";
+import { Loader2, FileText, ChevronDown, ChevronUp, Pill, Download, MessageCircle, Mail } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
@@ -117,6 +117,29 @@ function ConsultationCard({ c, patient }: { c: Consultation; patient: { firstNam
     }
   }, [c, patient, hasMeds]);
 
+  const handleWhatsAppRx = useCallback(() => {
+    if (!hasMeds) return;
+    const meds = c.prescriptions.flatMap(rx => rx.items);
+    const date = new Date(c.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const summary = meds.map(m => `• ${m.medicineName} — ${m.dosage ?? ''} ${m.frequency ?? ''} ${m.duration ?? ''}`).join('\n');
+    const msg = encodeURIComponent(
+      `My prescription from Dr. ${c.doctor?.firstName ?? ''} ${c.doctor?.lastName ?? ''} (${date}):\n\n${summary}${c.diagnosis ? `\n\nDiagnosis: ${c.diagnosis}` : ''}`
+    );
+    window.open(`https://wa.me/?text=${msg}`, '_blank');
+  }, [c, hasMeds]);
+
+  const handleEmailRx = useCallback(() => {
+    if (!hasMeds) return;
+    const meds = c.prescriptions.flatMap(rx => rx.items);
+    const date = new Date(c.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const summary = meds.map(m => `${m.medicineName}: ${m.dosage ?? ''} ${m.frequency ?? ''} for ${m.duration ?? ''}`).join('\n');
+    const subject = encodeURIComponent(`Prescription - Dr. ${c.doctor?.firstName ?? ''} ${c.doctor?.lastName ?? ''} - ${date}`);
+    const body = encodeURIComponent(
+      `Prescription from Dr. ${c.doctor?.firstName ?? ''} ${c.doctor?.lastName ?? ''} on ${date}:\n\n${summary}${c.diagnosis ? `\n\nDiagnosis: ${c.diagnosis}` : ''}`
+    );
+    window.open(`mailto:?subject=${subject}&body=${body}`);
+  }, [c, hasMeds]);
+
   return (
     <Card>
       <CardContent className="py-4 px-5">
@@ -193,14 +216,32 @@ function ConsultationCard({ c, patient }: { c: Consultation; patient: { firstNam
                     <Pill className="h-3 w-3" /> Prescription
                   </p>
                   {rx.items.length > 0 && (
-                    <button
-                      onClick={handleDownloadRx}
-                      disabled={printing}
-                      className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
-                    >
-                      {printing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
-                      Download Rx
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={handleDownloadRx}
+                        disabled={printing}
+                        className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
+                      >
+                        {printing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                        Download Rx
+                      </button>
+                      <span className="text-gray-300">|</span>
+                      <button
+                        onClick={handleWhatsAppRx}
+                        className="flex items-center gap-1 text-xs text-green-700 hover:underline"
+                        title="Share via WhatsApp"
+                      >
+                        <MessageCircle className="h-3 w-3" /> WhatsApp
+                      </button>
+                      <span className="text-gray-300">|</span>
+                      <button
+                        onClick={handleEmailRx}
+                        className="flex items-center gap-1 text-xs text-blue-700 hover:underline"
+                        title="Share via Email"
+                      >
+                        <Mail className="h-3 w-3" /> Email
+                      </button>
+                    </div>
                   )}
                 </div>
                 <div className="space-y-2">

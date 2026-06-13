@@ -16,8 +16,8 @@ import { cn } from "@/lib/utils";
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const loginSchema = z.object({
-  email:    z.string().email("Enter a valid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  identifier: z.string().min(1, "Staff ID or Email is required"),
+  password:   z.string().min(6, "Password must be at least 6 characters"),
   // Hospital slug — leave blank to log in as Platform Admin (SUPER_ADMIN)
   slug: z
     .string()
@@ -51,7 +51,7 @@ export default function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: "", password: "", slug: "" },
+    defaultValues: { identifier: "", password: "", slug: "" },
   });
 
   const slugValue = watch("slug") ?? "";
@@ -60,8 +60,8 @@ export default function LoginPage() {
     setServerError(null);
     try {
       const payload: Record<string, string> = {
-        email:    values.email,
-        password: values.password,
+        identifier: values.identifier,
+        password:   values.password,
       };
       // Only send slug if the user filled it in (blank = Platform Admin)
       if (values.slug?.trim()) payload.slug = values.slug.trim();
@@ -140,7 +140,7 @@ export default function LoginPage() {
             </div>
             <div className="px-4 py-3 bg-white/5 rounded-xl border border-white/10">
               <p className="text-blue-200 text-xs font-semibold mb-1">Hospital Staff (Admin / Doctor / Nurse…)</p>
-              <p className="text-blue-300/70 text-xs">Enter your Hospital ID (e.g. <span className="font-mono">citihospital</span>) then sign in with your credentials.</p>
+              <p className="text-blue-300/70 text-xs">Enter your Hospital ID (e.g. <span className="font-mono">citihospital</span>) then sign in with your Staff ID (e.g. <span className="font-mono">DOC0001</span>) or email.</p>
             </div>
           </div>
         </div>
@@ -215,26 +215,26 @@ export default function LoginPage() {
                   )}
                 </div>
 
-                {/* Email */}
+                {/* Staff ID or Email */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email
+                    Staff ID or Email
                   </label>
                   <input
-                    {...register("email")}
-                    type="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
+                    {...register("identifier")}
+                    type="text"
+                    autoComplete="username"
+                    placeholder="DOC0001 or you@example.com"
                     className={cn(
                       "w-full px-3 py-2.5 rounded-lg border text-sm bg-white transition-colors",
                       "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                      errors.email
+                      errors.identifier
                         ? "border-red-400 bg-red-50"
                         : "border-gray-300 hover:border-gray-400"
                     )}
                   />
-                  {errors.email && (
-                    <p className="text-xs text-red-600 mt-1">{errors.email.message}</p>
+                  {errors.identifier && (
+                    <p className="text-xs text-red-600 mt-1">{errors.identifier.message}</p>
                   )}
                 </div>
 
