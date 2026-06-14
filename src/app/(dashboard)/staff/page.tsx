@@ -33,6 +33,7 @@ interface DoctorProfile {
 
 interface StaffUser {
   id: string;
+  staffId?: string | null;
   email: string;
   firstName: string;
   lastName: string;
@@ -96,7 +97,8 @@ function SetPasswordModal({ user, onClose, onSuccess }: { user: StaffUser; onClo
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
             <h2 className="text-base font-semibold text-gray-900">Set Password</h2>
-            <p className="text-xs text-gray-500">{user.firstName} {user.lastName} · {user.email}</p>
+            <p className="text-xs text-gray-500">{user.firstName} {user.lastName} · {user.staffId ?? user.email}</p>
+            {user.staffId && <p className="text-xs text-gray-400 mt-0.5">Staff can login with <span className="font-mono font-semibold text-gray-600">{user.staffId}</span></p>}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
         </div>
@@ -500,6 +502,18 @@ function DetailPane({ user, onEdit, onSetPassword, onClose }: {
         )}
 
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-2">Account</p>
+        {user.staffId && (
+          <div className="flex items-start gap-2.5 py-2 border-b border-gray-50">
+            <span className="text-base leading-none mt-0.5 flex-shrink-0">🪪</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-gray-400 mb-0.5">Staff Login ID</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-gray-800 font-mono font-semibold">{user.staffId}</p>
+                <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">use at login</span>
+              </div>
+            </div>
+          </div>
+        )}
         <DetailRow icon="🔒" label="Status" value={user.isActive ? 'Active' : 'Inactive'} />
         <DetailRow icon="📆" label="Joined Platform" value={new Date(user.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} />
       </div>
