@@ -176,8 +176,9 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
       : (sp?.experienceYears != null ? String(sp.experienceYears) : ''),
     specialization: isDoc ? (dp?.specialty ?? '') : (sp?.specialization ?? ''),
   });
-  const [saving, setSaving] = useState(false);
-  const [error, setError]   = useState<string | null>(null);
+  const [saving, setSaving]           = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+  const [createdStaffId, setCreatedStaffId] = useState<string | null>(null);
 
   const f = (field: keyof StaffFormState) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -212,7 +213,8 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
         payload.email    = form.email;
         payload.password = form.password;
         payload.role     = role;
-        await iamApi.post('/users', payload);
+        const { data } = await iamApi.post<StaffUser>('/users', payload);
+        if (data.staffId) { setCreatedStaffId(data.staffId); return; }
       } else {
         payload.isActive = form.isActive;
         await iamApi.patch(`/users/${user!.id}`, payload);
@@ -222,6 +224,39 @@ function StaffModal({ mode, role, user, departments, onClose, onSuccess }: {
       const m = err?.response?.data?.message;
       setError(Array.isArray(m) ? m.join(', ') : m || 'Save failed');
     } finally { setSaving(false); }
+  }
+
+  // ── Success screen after creation — show the generated Staff ID ──────────
+  if (createdStaffId) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
+          <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-2xl">✅</span>
+          </div>
+          <h2 className="text-lg font-bold text-gray-900 mb-1">{form.firstName} {form.lastName} added!</h2>
+          <p className="text-sm text-gray-500 mb-6">Share these login credentials with them.</p>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-left space-y-3">
+            <div>
+              <p className="text-xs text-blue-500 font-semibold uppercase tracking-wide mb-0.5">Staff Login ID</p>
+              <p className="text-2xl font-mono font-bold text-blue-700 tracking-widest">{createdStaffId}</p>
+              <p className="text-xs text-blue-400 mt-0.5">Used instead of email at the login screen</p>
+            </div>
+            <div className="border-t border-blue-200 pt-3">
+              <p className="text-xs text-blue-500 font-semibold uppercase tracking-wide mb-0.5">Email</p>
+              <p className="text-sm text-blue-700 font-medium">{form.email}</p>
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-400 mb-4">The password was set during account creation. They can change it after logging in.</p>
+          <button onClick={onSuccess}
+            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">
+            Done
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -423,12 +458,38 @@ function StaffRow({ user, selected, onClick }: {
   );
 }
 
+// ─── Assign Staff ID button (for existing users without one) ──────────────────
+function AssignStaffIdButton({ userId, onAssigned }: { userId: string; onAssigned: () => void }) {
+  const [loading, setLoading] = useState(false);
+  async function assign() {
+    setLoading(true);
+    try {
+      await iamApi.post(`/users/${userId}/assign-staff-id`);
+      onAssigned();
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="text-base flex-shrink-0">🪪</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-gray-400 mb-1">Staff Login ID</p>
+        <button onClick={assign} disabled={loading}
+          className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50">
+          {loading ? 'Generating…' : '+ Assign a Staff ID'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Detail Pane ──────────────────────────────────────────────────────────────
-function DetailPane({ user, onEdit, onSetPassword, onClose }: {
+function DetailPane({ user, onEdit, onSetPassword, onClose, onRefresh }: {
   user: StaffUser;
   onEdit: () => void;
   onSetPassword: () => void;
   onClose: () => void;
+  onRefresh: () => void;
 }) {
   const meta     = ROLE_META[user.role] ?? ROLE_META.ALL;
   const sp       = user.staffProfile;
@@ -502,7 +563,7 @@ function DetailPane({ user, onEdit, onSetPassword, onClose }: {
         )}
 
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-4 mb-2">Account</p>
-        {user.staffId && (
+        {user.staffId ? (
           <div className="flex items-start gap-2.5 py-2 border-b border-gray-50">
             <span className="text-base leading-none mt-0.5 flex-shrink-0">🪪</span>
             <div className="min-w-0 flex-1">
@@ -512,6 +573,10 @@ function DetailPane({ user, onEdit, onSetPassword, onClose }: {
                 <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">use at login</span>
               </div>
             </div>
+          </div>
+        ) : (
+          <div className="py-2 border-b border-gray-50">
+            <AssignStaffIdButton userId={user.id} onAssigned={onRefresh} />
           </div>
         )}
         <DetailRow icon="🔒" label="Status" value={user.isActive ? 'Active' : 'Inactive'} />
@@ -772,6 +837,7 @@ export default function StaffPage() {
               onEdit={() => setModal({ type: 'edit', user: selectedUser })}
               onSetPassword={() => setModal({ type: 'password', user: selectedUser })}
               onClose={() => setSelectedUser(null)}
+              onRefresh={() => { fetchUsers(); setSelectedUser(null); }}
             />
           </div>
         )}
