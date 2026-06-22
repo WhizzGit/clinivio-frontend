@@ -289,7 +289,7 @@ function OnboardModal({ onClose, onSuccess }: {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
   }
   const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError]     = useState<{ message: string; details?: string[]; requestId?: string } | null>(null);
   const [showPwd, setShowPwd] = useState(false);
 
   function generatePassword() {
@@ -301,7 +301,7 @@ function OnboardModal({ onClose, onSuccess }: {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (form.adminPassword.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (form.adminPassword.length < 8) { setError({ message: 'Password must be at least 8 characters' }); return; }
     setSaving(true); setError(null);
     try {
       // NestJS @IsOptional() only skips validation for null/undefined — NOT for
@@ -313,9 +313,14 @@ function OnboardModal({ onClose, onSuccess }: {
       const res = await iamApi.post('/tenants', payload);
       onSuccess(res.data.credentials);
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string | string[] } } };
-      const msg = e?.response?.data?.message;
-      setError(Array.isArray(msg) ? msg.join(', ') : msg || 'Failed to onboard hospital');
+      const e = err as { response?: { data?: { message?: string | string[]; errors?: string[]; requestId?: string } } };
+      const data = e?.response?.data;
+      const msg = data?.message;
+      setError({
+        message: Array.isArray(msg) ? 'Please fix the following errors' : (msg || 'Failed to onboard hospital'),
+        details: Array.isArray(msg) ? msg : (data?.errors ?? undefined),
+        requestId: data?.requestId,
+      });
     } finally { setSaving(false); }
   }
 
@@ -328,7 +333,19 @@ function OnboardModal({ onClose, onSuccess }: {
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-6">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-3 space-y-1.5">
+              <p className="text-sm font-semibold text-red-700">{error.message}</p>
+              {error.details && error.details.length > 0 && (
+                <ul className="list-disc list-inside space-y-0.5">
+                  {error.details.map((d, i) => (
+                    <li key={i} className="text-xs text-red-600">{d}</li>
+                  ))}
+                </ul>
+              )}
+              {error.requestId && (
+                <p className="text-xs text-red-400 font-mono pt-0.5">Ref: {error.requestId}</p>
+              )}
+            </div>
           )}
 
           {/* Hospital Details */}
@@ -508,7 +525,7 @@ function EditTenantModal({ tenant, onClose, onSuccess }: {
     adminPassword:          '',
   });
   const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError]     = useState<{ message: string; details?: string[]; requestId?: string } | null>(null);
   const [showPwd, setShowPwd] = useState(false);
 
   // Split admin name into first / last if available
@@ -558,9 +575,14 @@ function EditTenantModal({ tenant, onClose, onSuccess }: {
       await iamApi.patch(`/tenants/${tenant.id}`, payload);
       onSuccess();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string | string[] } } };
-      const msg = e?.response?.data?.message;
-      setError(Array.isArray(msg) ? msg.join(', ') : msg || 'Save failed');
+      const e = err as { response?: { data?: { message?: string | string[]; errors?: string[]; requestId?: string } } };
+      const data = e?.response?.data;
+      const msg = data?.message;
+      setError({
+        message: Array.isArray(msg) ? 'Please fix the following errors' : (msg || 'Save failed'),
+        details: Array.isArray(msg) ? msg : (data?.errors ?? undefined),
+        requestId: data?.requestId,
+      });
     } finally { setSaving(false); }
   }
 
@@ -576,7 +598,19 @@ function EditTenantModal({ tenant, onClose, onSuccess }: {
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-6">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-3 space-y-1.5">
+              <p className="text-sm font-semibold text-red-700">{error.message}</p>
+              {error.details && error.details.length > 0 && (
+                <ul className="list-disc list-inside space-y-0.5">
+                  {error.details.map((d, i) => (
+                    <li key={i} className="text-xs text-red-600">{d}</li>
+                  ))}
+                </ul>
+              )}
+              {error.requestId && (
+                <p className="text-xs text-red-400 font-mono pt-0.5">Ref: {error.requestId}</p>
+              )}
+            </div>
           )}
 
           {/* Hospital Profile */}
