@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { appointmentApi, patientApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
@@ -31,6 +31,12 @@ interface MedItem {
   medicineName: string; genericName?: string; dosage: string;
   frequency: string; duration: string; instructions?: string;
   quantity: number; isSubstitutable?: boolean;
+  inventoryId?: string;
+}
+
+interface InventorySuggestion {
+  id: string; name: string; genericName?: string;
+  unit: string; sellingPrice: string; stockQty: number;
 }
 
 interface FollowUp {
@@ -152,9 +158,27 @@ export default function ConsultationPage() {
   const [labCategoryFilter, setLabCategoryFilter] = useState('');
   const [orderingLab, setOrderingLab] = useState(false);
 
+  // Medicine autocomplete state (per-row)
+  const [medSuggestions, setMedSuggestions] = useState<InventorySuggestion[]>([]);
+  const [medSuggestIdx, setMedSuggestIdx] = useState<number | null>(null); // which row is open
+  const medSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  const searchMedicines = useCallback((query: string, rowIdx: number) => {
+    if (medSearchTimer.current) clearTimeout(medSearchTimer.current);
+    if (!query || query.length < 2) { setMedSuggestions([]); setMedSuggestIdx(null); return; }
+    medSearchTimer.current = setTimeout(async () => {
+      try {
+        const res = await appointmentApi.get(`/pharmacy/inventory?q=${encodeURIComponent(query)}&limit=8`);
+        const items: InventorySuggestion[] = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
+        setMedSuggestions(items);
+        setMedSuggestIdx(items.length > 0 ? rowIdx : null);
+      } catch { /* silently ignore — doctor can still type freely */ }
+    }, 300);
   }, []);
 
   // Load appointment + consultation
@@ -252,7 +276,17 @@ export default function ConsultationPage() {
     try {
       await appointmentApi.post(`/appointments/${appointmentId}/consultation/prescription`, {
         notes: rxNotes || undefined,
-        items: valid,
+        items: valid.map(m => ({
+          medicineName: m.medicineName,
+          genericName: m.genericName || undefined,
+          dosage: m.dosage,
+          frequency: m.frequency,
+          duration: m.duration,
+          instructions: m.instructions || undefined,
+          quantity: m.quantity,
+          isSubstitutable: m.isSubstitutable,
+          inventoryId: m.inventoryId || undefined,
+        })),
       });
       showToast('Prescription saved');
     } catch (err: any) {
@@ -735,14 +769,56 @@ export default function ConsultationPage() {
                     )}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="md:col-span-2">
-                      <label className="text-xs text-gray-500 mb-1 block">Medicine Name <span className="text-red-400">*</span></label>
+                    <div className="md:col-span-2 relative">
+                      <label className="text-xs text-gray-500 mb-1 block">
+                        Medicine Name <span className="text-red-400">*</span>
+                        {m.inventoryId && <span className="ml-1.5 text-xs text-green-600 font-medium">✓ from inventory</span>}
+                      </label>
                       <input
                         value={m.medicineName}
-                        onChange={e => updateMed(i, 'medicineName', e.target.value)}
-                        placeholder="e.g. Paracetamol"
+                        onChange={e => {
+                          updateMed(i, 'medicineName', e.target.value);
+                          updateMed(i, 'inventoryId', undefined);
+                          searchMedicines(e.target.value, i);
+                        }}
+                        onBlur={() => setTimeout(() => { setMedSuggestIdx(null); setMedSuggestions([]); }, 200)}
+                        placeholder="e.g. Paracetamol — type to search inventory"
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                       />
+                      {medSuggestIdx === i && medSuggestions.length > 0 && (
+                        <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                          {medSuggestions.map(s => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onMouseDown={() => {
+                                setMeds(prev => prev.map((med, idx) => idx !== i ? med : {
+                                  ...med,
+                                  medicineName: s.name,
+                                  genericName: s.genericName || med.genericName,
+                                  inventoryId: s.id,
+                                }));
+                                setMedSuggestions([]);
+                                setMedSuggestIdx(null);
+                              }}
+                              className="w-full text-left px-3 py-2.5 hover:bg-blue-50 border-b border-gray-50 last:border-0"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900">{s.name}</p>
+                                  {s.genericName && <p className="text-xs text-gray-400">{s.genericName}</p>}
+                                </div>
+                                <div className="text-right flex-shrink-0 ml-3">
+                                  <p className="text-xs font-semibold text-gray-700">₹{Number(s.sellingPrice).toFixed(2)}</p>
+                                  <p className={`text-xs ${s.stockQty <= 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                                    {s.stockQty <= 0 ? 'Out of stock' : `${s.stockQty} ${s.unit} in stock`}
+                                  </p>
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="text-xs text-gray-500 mb-1 block">Generic Name</label>

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { appointmentApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -24,6 +24,7 @@ interface PharmacyOrder {
           duration: string;
           instructions?: string;
           quantity: number;
+          inventoryId?: string;
         }>;
       }>;
     };
@@ -268,6 +269,287 @@ function StockAdjustModal({ item, onClose, onSave }: {
   );
 }
 
+interface DispenseItem {
+  inventoryId: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number;
+  stockQty: number;
+}
+
+function DispenseModal({
+  order, onClose, onDone,
+}: {
+  order: PharmacyOrder;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [items, setItems] = useState<DispenseItem[]>([]);
+  const [invSearch, setInvSearch] = useState<Record<number, string>>({});
+  const [suggestions, setSuggestions] = useState<Record<number, InventoryItem[]>>({});
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CARD' | 'UPI' | 'ONLINE'>('CASH');
+  const [dispenserNotes, setDispenserNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const searchTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  // Seed dispense items from prescription (use inventoryId if linked)
+  useEffect(() => {
+    const rxItems = order.appointment?.consultation?.prescriptions?.[0]?.items ?? [];
+    const seeded: DispenseItem[] = rxItems.map(ri => ({
+      inventoryId: (ri as any).inventoryId ?? '',
+      name: ri.medicineName,
+      unit: 'Units',
+      quantity: ri.quantity,
+      unitPrice: 0,
+      stockQty: 999,
+    }));
+    setItems(seeded);
+
+    // Auto-resolve items that have inventoryId
+    rxItems.forEach(async (ri, idx) => {
+      const invId = (ri as any).inventoryId;
+      if (!invId) return;
+      try {
+        const res = await appointmentApi.get(`/pharmacy/inventory/${invId}`);
+        const inv = res.data;
+        setItems(prev => prev.map((it, i) => i !== idx ? it : {
+          ...it,
+          inventoryId: inv.id,
+          name: inv.name,
+          unit: inv.unit,
+          unitPrice: Number(inv.sellingPrice),
+          stockQty: inv.stockQty,
+        }));
+      } catch { /* leave as is */ }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const searchInventory = (rowIdx: number, q: string) => {
+    setInvSearch(p => ({ ...p, [rowIdx]: q }));
+    if (searchTimers.current[rowIdx]) clearTimeout(searchTimers.current[rowIdx]);
+    if (!q || q.length < 2) { setSuggestions(p => ({ ...p, [rowIdx]: [] })); return; }
+    searchTimers.current[rowIdx] = setTimeout(async () => {
+      try {
+        const res = await appointmentApi.get(`/pharmacy/inventory?q=${encodeURIComponent(q)}&limit=6`);
+        const list: InventoryItem[] = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
+        setSuggestions(p => ({ ...p, [rowIdx]: list }));
+      } catch { /* ignore */ }
+    }, 300);
+  };
+
+  const pickInventory = (rowIdx: number, inv: InventoryItem) => {
+    setItems(prev => prev.map((it, i) => i !== rowIdx ? it : {
+      ...it,
+      inventoryId: inv.id,
+      name: inv.name,
+      unit: inv.unit,
+      unitPrice: Number(inv.sellingPrice),
+      stockQty: inv.stockQty,
+    }));
+    setSuggestions(p => ({ ...p, [rowIdx]: [] }));
+    setInvSearch(p => ({ ...p, [rowIdx]: '' }));
+  };
+
+  const addRow = () => setItems(prev => [...prev, { inventoryId: '', name: '', unit: 'Units', quantity: 1, unitPrice: 0, stockQty: 999 }]);
+  const removeRow = (i: number) => setItems(prev => prev.filter((_, idx) => idx !== i));
+
+  const subtotal = items.reduce((s, it) => s + it.unitPrice * it.quantity, 0);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  async function handleDispense(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const unresolved = items.filter(it => !it.inventoryId);
+    if (unresolved.length > 0) {
+      setError(`${unresolved.length} item(s) not linked to inventory. Search and select each medicine.`);
+      return;
+    }
+    const overStock = items.find(it => it.quantity > it.stockQty);
+    if (overStock) {
+      setError(`"${overStock.name}" — requested ${overStock.quantity} but only ${overStock.stockQty} in stock.`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await appointmentApi.post(`/pharmacy/orders/${order.id}/dispense`, {
+        items: items.map(it => ({ inventoryId: it.inventoryId, quantity: it.quantity })),
+        paymentMethod,
+        dispenserNotes: dispenserNotes || undefined,
+      });
+      onDone();
+      onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e?.response?.data?.message || 'Dispense failed. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="font-semibold text-gray-900">Dispense Medicines</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {order.patient.firstName} {order.patient.lastName} · Token #{order.appointment.tokenNumber}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleDispense} className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+            {/* Items */}
+            {items.map((item, idx) => (
+              <div key={idx} className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-xs font-semibold text-gray-400 pt-1 w-5 flex-shrink-0">#{idx + 1}</span>
+                  <div className="flex-1 relative">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {item.inventoryId ? (
+                        <div className="flex-1 flex items-center justify-between bg-white border border-green-300 rounded-lg px-3 py-2">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{item.name}</p>
+                            <p className="text-xs text-gray-400">{item.unit} · ₹{item.unitPrice.toFixed(2)} each</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${item.stockQty <= 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                              {item.stockQty} in stock
+                            </span>
+                            <button type="button" onClick={() => setItems(prev => prev.map((it, i) => i !== idx ? it : { ...it, inventoryId: '', unitPrice: 0 }))}
+                              className="text-xs text-gray-400 hover:text-gray-700">Change</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex-1">
+                          <p className="text-xs text-gray-500 mb-1">{item.name || 'New item'} — search inventory to link</p>
+                          <div className="relative">
+                            <input
+                              value={invSearch[idx] ?? ''}
+                              onChange={e => searchInventory(idx, e.target.value)}
+                              onBlur={() => setTimeout(() => setSuggestions(p => ({ ...p, [idx]: [] })), 200)}
+                              placeholder="Search medicine in inventory…"
+                              className="w-full px-3 py-2 text-sm border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                            />
+                            {(suggestions[idx] ?? []).length > 0 && (
+                              <div className="absolute z-20 left-0 right-0 top-full mt-0.5 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                                {suggestions[idx].map(s => (
+                                  <button key={s.id} type="button" onMouseDown={() => pickInventory(idx, s)}
+                                    className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-50 last:border-0">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <p className="text-sm font-medium text-gray-900">{s.name}</p>
+                                        {s.genericName && <p className="text-xs text-gray-400">{s.genericName}</p>}
+                                      </div>
+                                      <div className="text-right ml-3">
+                                        <p className="text-xs font-semibold text-gray-700">₹{Number(s.sellingPrice).toFixed(2)}</p>
+                                        <p className={`text-xs ${s.stockQty <= 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                                          {s.stockQty <= 0 ? 'Out of stock' : `${s.stockQty} in stock`}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                      <button type="button" onClick={() => setItems(prev => prev.map((it, i) => i !== idx ? it : { ...it, quantity: Math.max(1, it.quantity - 1) }))}
+                        className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 text-sm font-bold">−</button>
+                      <input type="number" min={1} value={item.quantity}
+                        onChange={e => setItems(prev => prev.map((it, i) => i !== idx ? it : { ...it, quantity: Math.max(1, Number(e.target.value)) }))}
+                        className="w-12 text-center text-sm py-1.5 border-x border-gray-300 focus:outline-none" />
+                      <button type="button" onClick={() => setItems(prev => prev.map((it, i) => i !== idx ? it : { ...it, quantity: it.quantity + 1 }))}
+                        className="px-2 py-1.5 text-gray-500 hover:bg-gray-100 text-sm font-bold">+</button>
+                    </div>
+                    {items.length > 1 && (
+                      <button type="button" onClick={() => removeRow(idx)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {item.inventoryId && (
+                  <div className="flex justify-end pr-7">
+                    <p className="text-xs text-gray-500">
+                      {item.quantity} × ₹{item.unitPrice.toFixed(2)} = <span className="font-semibold text-gray-800">₹{r2(item.quantity * item.unitPrice).toFixed(2)}</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            <button type="button" onClick={addRow}
+              className="w-full py-2 text-sm text-blue-600 border border-dashed border-blue-300 rounded-xl hover:bg-blue-50">
+              + Add medicine
+            </button>
+
+            {/* Bill summary */}
+            <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700">Bill Total</span>
+                <span className="text-xl font-bold text-indigo-700">₹{r2(subtotal).toFixed(2)}</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">GST will be calculated from inventory rates on confirmation</p>
+            </div>
+
+            {/* Payment method */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-2">Payment Method</label>
+              <div className="grid grid-cols-4 gap-2">
+                {(['CASH', 'CARD', 'UPI', 'ONLINE'] as const).map(m => (
+                  <button key={m} type="button" onClick={() => setPaymentMethod(m)}
+                    className={`py-2 text-sm font-medium rounded-lg border transition-colors ${paymentMethod === m ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'}`}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Dispenser notes */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Dispenser Notes <span className="text-gray-400 font-normal">(optional)</span></label>
+              <textarea rows={2} value={dispenserNotes} onChange={e => setDispenserNotes(e.target.value)}
+                placeholder="Counselling given, substitution made…"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700">{error}</div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 py-4 border-t border-gray-100 flex gap-3">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 text-sm border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium">
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting}
+              className="flex-1 py-2.5 text-sm bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-60 flex items-center justify-center gap-2">
+              {submitting && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+              {submitting ? 'Dispensing…' : `Confirm Payment & Dispense · ₹${r2(subtotal).toFixed(2)}`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 interface PharmacyAnalytics {
   inventory: {
     totalItems: number; inventoryValue: number; lowStockCount: number; lowStockValue: number;
@@ -413,6 +695,7 @@ export default function PharmacyPage() {
   const [selected, setSelected] = useState<PharmacyOrder | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('PENDING');
   const [updating, setUpdating] = useState<string | null>(null);
+  const [dispenseModal, setDispenseModal] = useState<PharmacyOrder | null>(null);
 
   // Pharmacy settings state
   const [pharmaSettings, setPharmaSettings] = useState({
@@ -709,16 +992,17 @@ export default function PharmacyPage() {
                     )}
                   </div>
                   <div className="space-y-2 pt-2 border-t border-gray-100">
-                    {selected.status === 'PENDING' && (
-                      <button onClick={() => updateStatus(selected.id, 'DISPENSING')} disabled={updating === selected.id}
-                        className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                        {updating === selected.id ? 'Updating…' : 'Start Dispensing'}
+                    {(selected.status === 'PENDING' || selected.status === 'DISPENSING') && (
+                      <button
+                        onClick={() => setDispenseModal(selected)}
+                        className="w-full py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700">
+                        Dispense & Collect Payment
                       </button>
                     )}
-                    {selected.status === 'DISPENSING' && (
-                      <button onClick={() => updateStatus(selected.id, 'DISPENSED')} disabled={updating === selected.id}
-                        className="w-full py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
-                        {updating === selected.id ? 'Updating…' : 'Mark Dispensed'}
+                    {selected.status === 'PENDING' && (
+                      <button onClick={() => updateStatus(selected.id, 'DISPENSING')} disabled={updating === selected.id}
+                        className="w-full py-2.5 bg-blue-50 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-100 border border-blue-200 disabled:opacity-50">
+                        {updating === selected.id ? 'Updating…' : 'Mark as Dispensing (no payment)'}
                       </button>
                     )}
                     {['PENDING', 'DISPENSING'].includes(selected.status) && (
@@ -1062,6 +1346,13 @@ export default function PharmacyPage() {
           item={stockModal}
           onClose={() => setStockModal(null)}
           onSave={adjustStock}
+        />
+      )}
+      {dispenseModal && (
+        <DispenseModal
+          order={dispenseModal}
+          onClose={() => setDispenseModal(null)}
+          onDone={() => { fetchOrders(); setSelected(null); }}
         />
       )}
     </div>
