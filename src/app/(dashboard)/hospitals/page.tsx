@@ -543,7 +543,7 @@ function EditTenantModal({ tenant, onClose, onSuccess }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (form.adminPassword && form.adminPassword.length < 8) {
-      setError('New password must be at least 8 characters'); return;
+      setError({ message: 'New password must be at least 8 characters' }); return;
     }
     setSaving(true); setError(null);
 
