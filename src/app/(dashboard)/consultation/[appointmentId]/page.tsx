@@ -162,14 +162,32 @@ export default function ConsultationPage() {
   const [medSuggestions, setMedSuggestions] = useState<InventorySuggestion[]>([]);
   const [medSuggestIdx, setMedSuggestIdx] = useState<number | null>(null); // which row is open
   const medSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [inventoryCache, setInventoryCache] = useState<InventorySuggestion[]>([]);
+  const [inventoryLoaded, setInventoryLoaded] = useState(false);
 
   const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  const searchMedicines = useCallback((query: string, rowIdx: number) => {
+  const searchMedicines = useCallback((query: string, rowIdx: number, cache: InventorySuggestion[]) => {
     if (medSearchTimer.current) clearTimeout(medSearchTimer.current);
+
+    // Instant local filter when cache is ready
+    if (cache.length > 0) {
+      const q = query.trim().toLowerCase();
+      const filtered = q.length === 0
+        ? cache.slice(0, 10)
+        : cache.filter(it =>
+            it.name.toLowerCase().includes(q) ||
+            (it.genericName?.toLowerCase().includes(q))
+          ).slice(0, 10);
+      setMedSuggestions(filtered);
+      setMedSuggestIdx(filtered.length > 0 ? rowIdx : null);
+      return;
+    }
+
+    // Cache not ready — fall back to API search (2+ chars, debounced)
     if (!query || query.length < 2) { setMedSuggestions([]); setMedSuggestIdx(null); return; }
     medSearchTimer.current = setTimeout(async () => {
       try {
@@ -177,7 +195,7 @@ export default function ConsultationPage() {
         const items: InventorySuggestion[] = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
         setMedSuggestions(items);
         setMedSuggestIdx(items.length > 0 ? rowIdx : null);
-      } catch { /* silently ignore — doctor can still type freely */ }
+      } catch { /* doctor can still type freely */ }
     }, 300);
   }, []);
 
@@ -210,6 +228,18 @@ export default function ConsultationPage() {
     }
     load();
   }, [appointmentId, user?.tenantId]);
+
+  // Pre-load pharmacy inventory when prescription tab opens (enables instant autocomplete)
+  useEffect(() => {
+    if (tab !== 'prescription' || inventoryLoaded) return;
+    appointmentApi.get('/pharmacy/inventory?limit=200&isActive=true')
+      .then(res => {
+        const items: InventorySuggestion[] = Array.isArray(res.data) ? res.data : (res.data?.data ?? []);
+        setInventoryCache(items);
+      })
+      .catch(() => {})
+      .finally(() => setInventoryLoaded(true));
+  }, [tab, inventoryLoaded]);
 
   // Lab tests catalog — fetch once when tab first opens
   useEffect(() => {
@@ -779,10 +809,11 @@ export default function ConsultationPage() {
                         onChange={e => {
                           updateMed(i, 'medicineName', e.target.value);
                           updateMed(i, 'inventoryId', undefined);
-                          searchMedicines(e.target.value, i);
+                          searchMedicines(e.target.value, i, inventoryCache);
                         }}
+                        onFocus={() => searchMedicines(m.medicineName, i, inventoryCache)}
                         onBlur={() => setTimeout(() => { setMedSuggestIdx(null); setMedSuggestions([]); }, 200)}
-                        placeholder="e.g. Paracetamol — type to search inventory"
+                        placeholder="Click or type to search pharmacy inventory…"
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                       />
                       {medSuggestIdx === i && medSuggestions.length > 0 && (
