@@ -165,6 +165,18 @@ export default function ConsultationPage() {
   const [inventoryCache, setInventoryCache] = useState<InventorySuggestion[]>([]);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
 
+  // Patient condition tags
+  const [patientConditions, setPatientConditions] = useState<string[]>([]);
+  const [conditionSearch, setConditionSearch] = useState('');
+  const [showConditionSuggestions, setShowConditionSuggestions] = useState(false);
+  const [commonConditions, setCommonConditions] = useState<string[]>([]);
+  const [savingConditions, setSavingConditions] = useState(false);
+
+  // AI prescription suggestions
+  const [aiSuggestions, setAiSuggestions] = useState<Array<{ name: string; dosage: string; frequency: string; duration: string; notes?: string }>>([]);
+  const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
+  const [showAiPanel, setShowAiPanel] = useState(false);
+
   const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -240,6 +252,21 @@ export default function ConsultationPage() {
       .catch(() => {})
       .finally(() => setInventoryLoaded(true));
   }, [tab, inventoryLoaded]);
+
+  // Load common conditions list once
+  useEffect(() => {
+    appointmentApi.get('/analytics/common-conditions')
+      .then(r => setCommonConditions(r.data?.conditions ?? []))
+      .catch(() => {});
+  }, []);
+
+  // Load patient conditions when appointment is loaded
+  useEffect(() => {
+    if (!appt?.patient?.id) return;
+    appointmentApi.get(`/patients/${appt.patient.id}`)
+      .then(r => setPatientConditions(r.data?.conditions ?? []))
+      .catch(() => {});
+  }, [appt?.patient?.id]);
 
   // Lab tests catalog — fetch once when tab first opens
   useEffect(() => {
@@ -324,6 +351,75 @@ export default function ConsultationPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // ── Condition tag helpers ────────────────────────────────────────────────────
+
+  async function saveConditions(updated: string[]) {
+    if (!appt?.patient?.id) return;
+    setSavingConditions(true);
+    try {
+      await appointmentApi.patch(`/patients/${appt.patient.id}/conditions`, { conditions: updated });
+      setPatientConditions(updated);
+    } catch { /* silently ignore — conditions are non-critical */ }
+    finally { setSavingConditions(false); }
+  }
+
+  function addCondition(c: string) {
+    const trimmed = c.trim();
+    if (!trimmed || patientConditions.includes(trimmed)) return;
+    const updated = [...patientConditions, trimmed];
+    setPatientConditions(updated);
+    saveConditions(updated);
+    setConditionSearch('');
+    setShowConditionSuggestions(false);
+  }
+
+  function removeCondition(c: string) {
+    const updated = patientConditions.filter(x => x !== c);
+    setPatientConditions(updated);
+    saveConditions(updated);
+  }
+
+  const filteredConditions = conditionSearch.trim().length === 0
+    ? commonConditions.filter(c => !patientConditions.includes(c)).slice(0, 8)
+    : commonConditions
+        .filter(c => c.toLowerCase().includes(conditionSearch.toLowerCase()) && !patientConditions.includes(c))
+        .slice(0, 8);
+
+  // ── AI prescription suggestions ──────────────────────────────────────────────
+
+  async function getAiSuggestions() {
+    setAiSuggestLoading(true);
+    setShowAiPanel(true);
+    setAiSuggestions([]);
+    try {
+      const res = await appointmentApi.post('/analytics/prescription-suggestions', {
+        conditions: patientConditions,
+        diagnosis: diagnosis || '',
+        observations: observations || undefined,
+        ageInYears: appt?.patient?.dob
+          ? Math.floor((Date.now() - new Date(appt.patient.dob).getTime()) / (365.25 * 24 * 3600 * 1000))
+          : undefined,
+        gender: appt?.patient?.gender,
+      });
+      setAiSuggestions(res.data?.suggestions ?? []);
+    } catch {
+      showToast('AI suggestions unavailable — check ANTHROPIC_API_KEY', 'error');
+      setShowAiPanel(false);
+    } finally {
+      setAiSuggestLoading(false);
+    }
+  }
+
+  function addAiSuggestionToRx(s: { name: string; dosage: string; frequency: string; duration: string; notes?: string }) {
+    setMeds(prev => {
+      // Replace the last empty row if it's blank, otherwise append
+      const hasEmpty = prev[prev.length - 1]?.medicineName === '';
+      const base: MedItem = { medicineName: s.name, genericName: '', dosage: s.dosage, frequency: s.frequency, duration: s.duration, instructions: s.notes || '', quantity: 1, isSubstitutable: true };
+      return hasEmpty ? [...prev.slice(0, -1), base] : [...prev, base];
+    });
+    showToast(`Added ${s.name} to prescription`, 'success');
   }
 
   async function addFollowUp() {
@@ -778,16 +874,117 @@ export default function ConsultationPage() {
       {/* ── Prescription ── */}
       {tab === 'prescription' && (
         <div className="space-y-4">
+
+          {/* Condition tags card */}
           <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="font-semibold text-gray-900">Prescription</h2>
-              <button
-                onClick={() => setMeds([...meds, emptyMed()])}
-                className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium"
-              >
-                + Add Medicine
-              </button>
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="font-semibold text-gray-900 text-sm">Patient Conditions</h2>
+              <span className="text-xs text-gray-400">chronic / recurring — saved to patient profile</span>
+              {savingConditions && <span className="text-xs text-blue-500 ml-auto">Saving…</span>}
             </div>
+
+            {/* Existing condition chips */}
+            <div className="flex flex-wrap gap-2 mb-3 min-h-[28px]">
+              {patientConditions.length === 0 && (
+                <span className="text-xs text-gray-400 py-1">No conditions tagged — add below</span>
+              )}
+              {patientConditions.map(c => (
+                <span key={c} className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-50 text-orange-800 text-xs rounded-full border border-orange-200 font-medium">
+                  {c}
+                  <button type="button" onClick={() => removeCondition(c)} className="text-orange-400 hover:text-orange-700 leading-none">×</button>
+                </span>
+              ))}
+            </div>
+
+            {/* Add condition input */}
+            <div className="relative">
+              <input
+                value={conditionSearch}
+                onChange={e => { setConditionSearch(e.target.value); setShowConditionSuggestions(true); }}
+                onFocus={() => setShowConditionSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowConditionSuggestions(false), 200)}
+                onKeyDown={e => { if (e.key === 'Enter' && conditionSearch.trim()) { addCondition(conditionSearch); } }}
+                placeholder="Search or type a condition, press Enter to add…"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 bg-gray-50"
+              />
+              {showConditionSuggestions && filteredConditions.length > 0 && (
+                <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+                  {filteredConditions.map(c => (
+                    <button key={c} type="button" onMouseDown={() => addCondition(c)}
+                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-800 border-b border-gray-50 last:border-0">
+                      {c}
+                    </button>
+                  ))}
+                  {conditionSearch.trim() && !commonConditions.includes(conditionSearch.trim()) && (
+                    <button type="button" onMouseDown={() => addCondition(conditionSearch)}
+                      className="w-full text-left px-4 py-2.5 text-sm text-blue-700 hover:bg-blue-50 border-t border-gray-100 font-medium">
+                      + Add &quot;{conditionSearch.trim()}&quot; as custom condition
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-gray-900">Prescription</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={getAiSuggestions}
+                  disabled={aiSuggestLoading}
+                  title="Get AI-powered medicine suggestions based on patient conditions and diagnosis"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gradient-to-r from-violet-50 to-blue-50 text-violet-700 border border-violet-200 rounded-lg hover:from-violet-100 hover:to-blue-100 font-medium disabled:opacity-60"
+                >
+                  {aiSuggestLoading
+                    ? <><div className="w-3 h-3 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" /> Thinking…</>
+                    : <>✨ AI Suggest</>
+                  }
+                </button>
+                <button
+                  onClick={() => setMeds([...meds, emptyMed()])}
+                  className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium"
+                >
+                  + Add Medicine
+                </button>
+              </div>
+            </div>
+
+            {/* AI suggestions panel */}
+            {showAiPanel && (
+              <div className="mb-4 bg-gradient-to-br from-violet-50 to-blue-50 rounded-xl border border-violet-200 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-violet-700">✨ AI Suggested Medicines — click to add</p>
+                  <button onClick={() => setShowAiPanel(false)} className="text-violet-400 hover:text-violet-700 text-sm leading-none">×</button>
+                </div>
+                {aiSuggestLoading && (
+                  <div className="flex items-center gap-2 py-2">
+                    <div className="w-4 h-4 border-2 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+                    <span className="text-xs text-violet-500">Analysing patient conditions and diagnosis…</span>
+                  </div>
+                )}
+                {!aiSuggestLoading && aiSuggestions.length === 0 && (
+                  <p className="text-xs text-violet-400 py-1">No suggestions available — add diagnosis and conditions for better results</p>
+                )}
+                {aiSuggestions.map((s, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => addAiSuggestionToRx(s)}
+                    className="w-full text-left mb-2 last:mb-0 p-3 bg-white/70 hover:bg-white rounded-xl border border-violet-100 hover:border-violet-300 transition-all group"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 group-hover:text-violet-700">{s.name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{s.dosage} · {s.frequency} · {s.duration}</p>
+                        {s.notes && <p className="text-xs text-amber-700 mt-1 bg-amber-50 px-2 py-0.5 rounded">{s.notes}</p>}
+                      </div>
+                      <span className="text-xs text-violet-500 font-medium flex-shrink-0 group-hover:text-violet-700">+ Add</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="space-y-3">
               {meds.map((m, i) => (

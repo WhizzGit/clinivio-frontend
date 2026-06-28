@@ -28,3 +28,5 @@ next-env.d.ts
 # Editor
 .vscode/settings.json
 .idea/
+
+.vercel

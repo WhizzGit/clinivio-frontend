@@ -21,6 +21,7 @@ const navItems = [
   { href: '/doctors', label: 'Doctors', icon: '🩺', roles: ['ADMIN'] },
   { href: '/departments', label: 'Departments', icon: '🏷️', roles: ['ADMIN'] },
   { href: '/staff', label: 'Staff & Passwords', icon: '👤', roles: ['ADMIN'] },
+  { href: '/analytics', label: 'Patient Analytics', icon: '📊', roles: ['ADMIN', 'DOCTOR'] },
   { href: '/settings', label: 'Settings', icon: '⚙️', roles: ['SUPER_ADMIN', 'ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'PHARMACIST'] },
   { href: '/audit', label: 'Audit Trail', icon: '🔍', roles: ['ADMIN', 'SUPER_ADMIN'] },
 ];
