@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { patientApi, appointmentApi, billingApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
@@ -15,6 +15,86 @@ interface Patient {
   preferredLanguage: string; address?: string;
   emergencyContactName?: string; emergencyContactPhone?: string;
   consentGivenAt?: string; isActive: boolean; createdAt: string;
+  conditions?: string[];
+}
+
+// ─── Condition helpers ────────────────────────────────────────────────────────
+
+const CONDITION_COLORS = [
+  'bg-orange-100 text-orange-700 border-orange-200',
+  'bg-purple-100 text-purple-700 border-purple-200',
+  'bg-red-100 text-red-700 border-red-200',
+  'bg-blue-100 text-blue-700 border-blue-200',
+  'bg-green-100 text-green-700 border-green-200',
+];
+function conditionColor(c: string) {
+  const idx = Math.abs(c.split('').reduce((a, ch) => a + ch.charCodeAt(0), 0)) % CONDITION_COLORS.length;
+  return CONDITION_COLORS[idx];
+}
+
+function ConditionTagInput({
+  value, onChange, commonConditions,
+}: { value: string[]; onChange: (t: string[]) => void; commonConditions: string[] }) {
+  const [search, setSearch] = useState('');
+  const [showDrop, setShowDrop] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function close(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setShowDrop(false);
+    }
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  const filtered = commonConditions.filter(
+    c => !value.includes(c) && c.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  function add(c: string) {
+    const clean = c.trim();
+    if (clean && !value.includes(clean)) onChange([...value, clean]);
+    setSearch(''); setShowDrop(false);
+  }
+  function remove(c: string) { onChange(value.filter(x => x !== c)); }
+  function onKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if ((e.key === 'Enter' || e.key === ',') && search.trim()) { e.preventDefault(); add(search); }
+    if (e.key === 'Backspace' && !search && value.length) onChange(value.slice(0, -1));
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="min-h-[42px] w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus-within:ring-2 focus-within:ring-orange-400 flex flex-wrap gap-1.5 items-center">
+        {value.map(c => (
+          <span key={c} className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border', conditionColor(c))}>
+            {c}
+            <button type="button" onClick={() => remove(c)} className="hover:opacity-70 leading-none font-bold">&times;</button>
+          </span>
+        ))}
+        <input
+          value={search}
+          onChange={e => { setSearch(e.target.value); setShowDrop(true); }}
+          onFocus={() => setShowDrop(true)}
+          onKeyDown={onKey}
+          placeholder={value.length ? '' : 'Search or type condition…'}
+          className="flex-1 min-w-[140px] outline-none text-sm bg-transparent placeholder-gray-400"
+        />
+      </div>
+      {showDrop && (search || filtered.length > 0) && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {filtered.length === 0 && search.trim() ? (
+            <button type="button" onMouseDown={() => add(search)}
+              className="w-full px-3 py-2 text-sm text-left hover:bg-gray-50 text-blue-600">
+              Add &ldquo;{search}&rdquo;
+            </button>
+          ) : filtered.slice(0, 20).map(c => (
+            <button type="button" key={c} onMouseDown={() => add(c)}
+              className="w-full px-3 py-2 text-sm text-left hover:bg-orange-50 hover:text-orange-700">{c}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface Appointment {
@@ -308,6 +388,12 @@ export default function PatientDetailPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(null);
 
+  // Conditions
+  const [editingConditions, setEditingConditions] = useState(false);
+  const [draftConditions, setDraftConditions] = useState<string[]>([]);
+  const [savingConditions, setSavingConditions] = useState(false);
+  const [commonConditions, setCommonConditions] = useState<string[]>([]);
+
   const fetchPatient = useCallback(async () => {
     try {
       setLoadingPatient(true);
@@ -339,8 +425,32 @@ export default function PatientDetailPage() {
   useEffect(() => { fetchPatient(); }, [fetchPatient]);
   useEffect(() => { if (tab === 'history' || tab === 'billing') fetchAppointments(); }, [tab, fetchAppointments]);
   useEffect(() => { if (tab === 'billing') fetchInvoices(); }, [tab, fetchInvoices]);
+  useEffect(() => {
+    appointmentApi.get('/analytics/common-conditions')
+      .then(r => setCommonConditions(r.data?.conditions ?? [])).catch(() => {});
+  }, []);
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 4000); }
+
+  function startEditConditions() {
+    setDraftConditions(patient?.conditions ?? []);
+    setEditingConditions(true);
+  }
+
+  async function saveConditions() {
+    if (!patient) return;
+    setSavingConditions(true);
+    try {
+      await patientApi.patch(`/patients/${patient.id}/conditions`, { conditions: draftConditions });
+      setPatient(prev => prev ? { ...prev, conditions: draftConditions } : prev);
+      setEditingConditions(false);
+      showToast('Conditions saved!');
+    } catch {
+      showToast('Failed to save conditions');
+    } finally {
+      setSavingConditions(false);
+    }
+  }
 
   function printInvoiceReceipt(inv: Invoice) {
     if (!patient) return;
@@ -430,6 +540,15 @@ export default function PatientDetailPage() {
                   Consent {p.consentGivenAt ? 'Given' : 'Pending'}
                 </span>
               </div>
+              {(p.conditions ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {(p.conditions ?? []).map(c => (
+                    <span key={c} className={cn('inline-flex px-2 py-0.5 rounded-full text-xs font-medium border', conditionColor(c))}>
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -501,6 +620,61 @@ export default function PatientDetailPage() {
               <Row label="UHID" value={p.uhid} mono />
               {p.consentGivenAt && <Row label="Consent Given" value={fmt(p.consentGivenAt)} />}
             </dl>
+          </div>
+
+          {/* Medical Conditions card */}
+          <div className="md:col-span-2 bg-white rounded-xl border border-orange-200 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-700">Major Medical Conditions</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Chronic or pre-existing conditions used for clinical analytics</p>
+              </div>
+              {!editingConditions && canEdit && (
+                <button
+                  onClick={startEditConditions}
+                  className="px-3 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors"
+                >
+                  {(p.conditions ?? []).length === 0 ? '+ Add Conditions' : 'Edit'}
+                </button>
+              )}
+            </div>
+
+            {editingConditions ? (
+              <div className="space-y-3">
+                <ConditionTagInput
+                  value={draftConditions}
+                  onChange={setDraftConditions}
+                  commonConditions={commonConditions}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveConditions}
+                    disabled={savingConditions}
+                    className="px-4 py-1.5 text-sm bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 disabled:opacity-60 flex items-center gap-2"
+                  >
+                    {savingConditions
+                      ? <><span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />Saving…</>
+                      : 'Save Conditions'}
+                  </button>
+                  <button
+                    onClick={() => setEditingConditions(false)}
+                    className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (p.conditions ?? []).length === 0 ? (
+              <p className="text-sm text-gray-400 italic">No conditions tagged yet.{canEdit ? ' Click Edit to add.' : ''}</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(p.conditions ?? []).map(c => (
+                  <span key={c} className={cn('inline-flex px-3 py-1 rounded-full text-xs font-medium border', conditionColor(c))}>
+                    {c}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
