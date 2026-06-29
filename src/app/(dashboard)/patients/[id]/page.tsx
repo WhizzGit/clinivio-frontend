@@ -388,11 +388,13 @@ export default function PatientDetailPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [printingReceiptId, setPrintingReceiptId] = useState<string | null>(null);
 
-  // Conditions
+  // Conditions — editable inline from the header
   const [editingConditions, setEditingConditions] = useState(false);
   const [draftConditions, setDraftConditions] = useState<string[]>([]);
   const [savingConditions, setSavingConditions] = useState(false);
   const [commonConditions, setCommonConditions] = useState<string[]>([]);
+  // roles that can tag (wider than canEdit)
+  const canTag = ['ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST'].includes(user?.role ?? '');
 
   const fetchPatient = useCallback(async () => {
     try {
@@ -523,11 +525,11 @@ export default function PatientDetailPage() {
       {/* Header card */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-4">
+          <div className="flex items-start gap-4 flex-1 min-w-0">
             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-xl flex-shrink-0">
               {p.firstName[0]}{p.lastName?.[0] ?? ''}
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <h1 className="text-xl font-bold text-gray-900">{p.firstName} {p.lastName}</h1>
               <div className="flex items-center gap-3 mt-1 text-sm text-gray-500 flex-wrap">
                 <span className="font-mono text-blue-600 font-medium">{p.uhid}</span>
@@ -540,17 +542,70 @@ export default function PatientDetailPage() {
                   Consent {p.consentGivenAt ? 'Given' : 'Pending'}
                 </span>
               </div>
-              {(p.conditions ?? []).length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {(p.conditions ?? []).map(c => (
-                    <span key={c} className={cn('inline-flex px-2 py-0.5 rounded-full text-xs font-medium border', conditionColor(c))}>
-                      {c}
-                    </span>
-                  ))}
-                </div>
-              )}
+
+              {/* Condition tags — inline editor */}
+              <div className="mt-3">
+                {!editingConditions ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(p.conditions ?? []).length === 0 ? (
+                      canTag ? (
+                        <button
+                          onClick={startEditConditions}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border border-dashed border-orange-300 text-orange-500 hover:bg-orange-50 transition-colors"
+                        >
+                          <span className="text-sm leading-none">+</span> Tag major condition
+                        </button>
+                      ) : null
+                    ) : (
+                      <>
+                        {(p.conditions ?? []).map(c => (
+                          <span key={c} className={cn('inline-flex px-2.5 py-1 rounded-full text-xs font-medium border', conditionColor(c))}>
+                            {c}
+                          </span>
+                        ))}
+                        {canTag && (
+                          <button
+                            onClick={startEditConditions}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium text-gray-400 hover:text-orange-600 hover:bg-orange-50 border border-transparent hover:border-orange-200 transition-colors"
+                            title="Edit conditions"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                            Edit tags
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-1 space-y-2 max-w-xl">
+                    <ConditionTagInput
+                      value={draftConditions}
+                      onChange={setDraftConditions}
+                      commonConditions={commonConditions}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={saveConditions}
+                        disabled={savingConditions}
+                        className="px-3 py-1.5 text-xs bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 disabled:opacity-60 flex items-center gap-1.5"
+                      >
+                        {savingConditions
+                          ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />Saving…</>
+                          : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => setEditingConditions(false)}
+                        className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
+
           <div className="flex items-center gap-2 flex-shrink-0">
             {canEdit && (
               <>

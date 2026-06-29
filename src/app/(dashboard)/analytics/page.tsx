@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { appointmentApi } from '@/lib/api';
+import { useAuthStore } from '@/store/auth.store';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -12,6 +13,7 @@ interface VitalTrends   {
   condition: string; patientCount: number; consultationCount: number;
   averageVitals: { bpSystolic?: number | null; bpDiastolic?: number | null; pulseRate?: number | null; spo2?: number | null; rbsMgDl?: number | null; bmi?: number | null };
 }
+interface DoctorStats { totalConsultations: number; totalPrescriptions: number; uniquePatients: number; }
 
 const PALETTE = [
   '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
@@ -27,7 +29,13 @@ function LoadingSpinner() {
 }
 
 function StatCard({ label, value, sub, color = 'blue' }: { label: string; value: string | number; sub?: string; color?: string }) {
-  const colors: Record<string, string> = { blue: 'bg-blue-50 text-blue-700 border-blue-200', green: 'bg-green-50 text-green-700 border-green-200', purple: 'bg-purple-50 text-purple-700 border-purple-200', amber: 'bg-amber-50 text-amber-700 border-amber-200' };
+  const colors: Record<string, string> = {
+    blue:   'bg-blue-50 text-blue-700 border-blue-200',
+    green:  'bg-green-50 text-green-700 border-green-200',
+    purple: 'bg-purple-50 text-purple-700 border-purple-200',
+    amber:  'bg-amber-50 text-amber-700 border-amber-200',
+    teal:   'bg-teal-50 text-teal-700 border-teal-200',
+  };
   return (
     <div className={`rounded-2xl border p-5 ${colors[color] ?? colors.blue}`}>
       <p className="text-xs font-medium uppercase tracking-wide opacity-70">{label}</p>
@@ -38,40 +46,62 @@ function StatCard({ label, value, sub, color = 'blue' }: { label: string; value:
 }
 
 export default function AnalyticsPage() {
+  const { user } = useAuthStore();
+  const isDoctor = user?.role === 'DOCTOR';
+
+  const [mineOnly, setMineOnly] = useState(false);
   const [conditionData, setConditionData] = useState<{ totalPatients: number; patientsTagged: number; distribution: ConditionStat[] } | null>(null);
   const [medicineData, setMedicineData]   = useState<{ condition: string; patientCount: number; medicines: MedicineStat[] } | null>(null);
   const [vitalData, setVitalData]         = useState<VitalTrends | null>(null);
   const [aiInsights, setAiInsights]       = useState<string | null>(null);
   const [aiLoading, setAiLoading]         = useState(false);
+  const [doctorStats, setDoctorStats]     = useState<DoctorStats | null>(null);
   const [selectedCondition, setSelectedCondition] = useState<string>('');
   const [loadingConditions, setLoadingConditions] = useState(true);
   const [loadingMeds, setLoadingMeds]     = useState(false);
   const [loadingVitals, setLoadingVitals] = useState(false);
   const [chartType, setChartType]         = useState<'bar' | 'pie'>('bar');
 
+  const mineParam = mineOnly ? '&mine=true' : '';
+
+  const loadConditions = useCallback(() => {
+    setLoadingConditions(true);
+    setConditionData(null);
+    setSelectedCondition('');
+    setMedicineData(null);
+    setVitalData(null);
+    appointmentApi.get(`/analytics/conditions?v=1${mineParam}`)
+      .then(r => setConditionData(r.data))
+      .catch(() => {})
+      .finally(() => setLoadingConditions(false));
+  }, [mineParam]);
+
+  useEffect(() => { loadConditions(); }, [loadConditions]);
+
   useEffect(() => {
-    appointmentApi.get('/analytics/conditions')
-      .then(r => { setConditionData(r.data); setLoadingConditions(false); })
-      .catch(() => setLoadingConditions(false));
-  }, []);
+    if (!isDoctor) return;
+    appointmentApi.get('/analytics/my-stats')
+      .then(r => setDoctorStats(r.data))
+      .catch(() => {});
+  }, [isDoctor]);
 
   const loadMedicinePatterns = useCallback((condition: string) => {
     setLoadingMeds(true);
-    const q = condition ? `?condition=${encodeURIComponent(condition)}` : '';
-    appointmentApi.get(`/analytics/medicine-patterns${q}`)
+    const q = condition ? `&condition=${encodeURIComponent(condition)}` : '';
+    appointmentApi.get(`/analytics/medicine-patterns?v=1${q}${mineParam}`)
       .then(r => setMedicineData(r.data))
       .catch(() => {})
       .finally(() => setLoadingMeds(false));
-  }, []);
+  }, [mineParam]);
 
   const loadVitalTrends = useCallback((condition: string) => {
     if (!condition) return;
     setLoadingVitals(true);
-    appointmentApi.get(`/analytics/vital-trends?condition=${encodeURIComponent(condition)}`)
+    appointmentApi.get(`/analytics/vital-trends?condition=${encodeURIComponent(condition)}${mineParam}`)
       .then(r => setVitalData(r.data))
       .catch(() => {})
       .finally(() => setLoadingVitals(false));
-  }, []);
+  }, [mineParam]);
 
   function selectCondition(c: string) {
     setSelectedCondition(c);
@@ -82,7 +112,7 @@ export default function AnalyticsPage() {
   function loadAiInsights() {
     setAiLoading(true);
     setAiInsights(null);
-    appointmentApi.get('/analytics/ai-insights')
+    appointmentApi.get(`/analytics/ai-insights?v=1${mineParam}`)
       .then(r => setAiInsights(r.data?.insights ?? 'No insights available.'))
       .catch(() => setAiInsights('Failed to load AI insights. Check that ANTHROPIC_API_KEY is configured.'))
       .finally(() => setAiLoading(false));
@@ -92,32 +122,82 @@ export default function AnalyticsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-8">
+
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Patient Analytics</h1>
           <p className="text-sm text-gray-500 mt-1">Disease grouping, prescription patterns & AI-powered population insights</p>
         </div>
-        <button
-          onClick={loadAiInsights}
-          disabled={aiLoading}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-blue-600 text-white text-sm font-semibold rounded-xl shadow hover:opacity-90 disabled:opacity-60"
-        >
-          {aiLoading ? (
-            <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Generating…</>
-          ) : (
-            <>✨ AI Insights</>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {/* My Patients / All toggle — doctors only */}
+          {isDoctor && (
+            <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+              <button
+                onClick={() => setMineOnly(false)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${!mineOnly ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                All Patients
+              </button>
+              <button
+                onClick={() => setMineOnly(true)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${mineOnly ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                My Patients
+              </button>
+            </div>
           )}
-        </button>
+          <button
+            onClick={loadAiInsights}
+            disabled={aiLoading}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-blue-600 text-white text-sm font-semibold rounded-xl shadow hover:opacity-90 disabled:opacity-60"
+          >
+            {aiLoading ? (
+              <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Generating…</>
+            ) : <>✨ AI Insights</>}
+          </button>
+        </div>
       </div>
 
-      {/* Stat cards */}
+      {/* Doctor "My Stats" strip */}
+      {isDoctor && doctorStats && (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white">
+            <p className="text-xs font-medium uppercase tracking-wide opacity-75">My Consultations</p>
+            <p className="text-3xl font-bold mt-1">{doctorStats.totalConsultations.toLocaleString()}</p>
+            <p className="text-xs mt-1 opacity-60">total recorded</p>
+          </div>
+          <div className="bg-gradient-to-br from-teal-600 to-teal-700 rounded-2xl p-5 text-white">
+            <p className="text-xs font-medium uppercase tracking-wide opacity-75">My Prescriptions</p>
+            <p className="text-3xl font-bold mt-1">{doctorStats.totalPrescriptions.toLocaleString()}</p>
+            <p className="text-xs mt-1 opacity-60">prescriptions written</p>
+          </div>
+          <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl p-5 text-white">
+            <p className="text-xs font-medium uppercase tracking-wide opacity-75">My Unique Patients</p>
+            <p className="text-3xl font-bold mt-1">{doctorStats.uniquePatients.toLocaleString()}</p>
+            <p className="text-xs mt-1 opacity-60">patients seen</p>
+          </div>
+        </div>
+      )}
+
+      {/* Scope banner */}
+      {mineOnly && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 flex items-center gap-2 text-sm text-blue-700">
+          <span className="font-semibold">My Patients view:</span>
+          <span>Showing analytics for patients you have previously consulted.</span>
+          <button onClick={() => setMineOnly(false)} className="ml-auto text-xs underline text-blue-500 hover:text-blue-700">Switch to all patients</button>
+        </div>
+      )}
+
+      {/* Population stat cards */}
       {loadingConditions ? <LoadingSpinner /> : conditionData && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="Total Patients" value={conditionData.totalPatients.toLocaleString()} color="blue" />
-          <StatCard label="Patients Tagged" value={conditionData.patientsTagged.toLocaleString()} sub={`${Math.round(conditionData.patientsTagged / (conditionData.totalPatients || 1) * 100)}% of all patients`} color="green" />
-          <StatCard label="Unique Conditions" value={conditionData.distribution.length} sub="recorded across patients" color="purple" />
-          <StatCard label="Top Condition" value={conditionData.distribution[0]?.condition ?? '—'} sub={conditionData.distribution[0] ? `${conditionData.distribution[0].count} patients` : ''} color="amber" />
+          <StatCard label="Patients Tagged" value={conditionData.patientsTagged.toLocaleString()}
+            sub={`${Math.round(conditionData.patientsTagged / (conditionData.totalPatients || 1) * 100)}% of ${mineOnly ? 'my' : 'all'} patients`} color="green" />
+          <StatCard label="Unique Conditions" value={conditionData.distribution.length} sub="recorded" color="purple" />
+          <StatCard label="Top Condition" value={conditionData.distribution[0]?.condition ?? '—'}
+            sub={conditionData.distribution[0] ? `${conditionData.distribution[0].count} patients` : ''} color="amber" />
         </div>
       )}
 
@@ -156,7 +236,7 @@ export default function AnalyticsPage() {
             <ResponsiveContainer width="100%" height={320}>
               <PieChart>
                 <Pie data={topConditions} dataKey="count" nameKey="condition" cx="50%" cy="50%" outerRadius={120}
-                  onClick={(d) => selectCondition(d.condition)} cursor="pointer" label={({ condition, percentage }) => `${percentage}%`}>
+                  onClick={(d) => selectCondition(d.condition)} cursor="pointer" label={({ percentage }) => `${percentage}%`}>
                   {topConditions.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
                 </Pie>
                 <Legend formatter={(v) => <span className="text-xs">{v}</span>} />
@@ -242,6 +322,7 @@ export default function AnalyticsPage() {
           <div className="flex items-center gap-2 mb-4">
             <span className="text-lg">✨</span>
             <h2 className="text-base font-semibold text-violet-900">AI Population Insights</h2>
+            {mineOnly && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">My Patients</span>}
             {aiLoading && <div className="w-4 h-4 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin ml-auto" />}
           </div>
           {aiInsights && (
@@ -263,7 +344,11 @@ export default function AnalyticsPage() {
         <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
           <p className="text-4xl mb-3">📊</p>
           <p className="text-base font-medium text-gray-700">No condition data yet</p>
-          <p className="text-sm text-gray-400 mt-1">Start tagging patient conditions during consultations to see analytics here.</p>
+          <p className="text-sm text-gray-400 mt-1">
+            {mineOnly
+              ? 'None of your patients have been tagged with conditions yet. Tag conditions during a consultation.'
+              : 'Start tagging patient conditions during consultations or from the Patients list to see analytics here.'}
+          </p>
         </div>
       )}
     </div>
