@@ -226,7 +226,7 @@ export default function AnalyticsPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="condition" tick={{ fontSize: 11 }} angle={-35} textAnchor="end" interval={0} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number, _: string, { payload }: { payload: ConditionStat }) => [`${v} patients (${payload.percentage}%)`, 'Count']} />
+                <Tooltip formatter={(v: number, _: string, item: any) => [`${v} patients (${item?.payload?.percentage ?? 0}%)`, 'Count']} />
                 <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer">
                   {topConditions.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
                 </Bar>
@@ -240,7 +240,7 @@ export default function AnalyticsPage() {
                   {topConditions.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
                 </Pie>
                 <Legend formatter={(v) => <span className="text-xs">{v}</span>} />
-                <Tooltip formatter={(v: number, k: string, { payload }: { payload: ConditionStat }) => [`${v} patients (${payload.percentage}%)`, k]} />
+                <Tooltip formatter={(v: number, k: string, item: any) => [`${v} patients (${item?.payload?.percentage ?? 0}%)`, k]} />
               </PieChart>
             </ResponsiveContainer>
           )}
