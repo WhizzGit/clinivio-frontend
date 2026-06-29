@@ -114,7 +114,10 @@ export default function AnalyticsPage() {
     setAiInsights(null);
     appointmentApi.get(`/analytics/ai-insights?v=1${mineParam}`)
       .then(r => setAiInsights(r.data?.insights ?? 'No insights available.'))
-      .catch(() => setAiInsights('Failed to load AI insights. Check that ANTHROPIC_API_KEY is configured.'))
+      .catch((err: any) => {
+        const msg = err?.response?.data?.message ?? err?.message ?? 'Unknown error';
+        setAiInsights(`⚠️ ${msg}`);
+      })
       .finally(() => setAiLoading(false));
   }
 
