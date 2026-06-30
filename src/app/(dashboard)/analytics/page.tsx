@@ -61,6 +61,8 @@ export default function AnalyticsPage() {
   const [loadingMeds, setLoadingMeds]     = useState(false);
   const [loadingVitals, setLoadingVitals] = useState(false);
   const [chartType, setChartType]         = useState<'bar' | 'pie'>('bar');
+  const [ageData, setAgeData] = useState<{ ageGroup: string; count: number; percentage: number }[] | null>(null);
+  const [loadingAge, setLoadingAge] = useState(true);
 
   const mineParam = mineOnly ? '&mine=true' : '';
 
@@ -77,6 +79,15 @@ export default function AnalyticsPage() {
   }, [mineParam]);
 
   useEffect(() => { loadConditions(); }, [loadConditions]);
+
+  useEffect(() => {
+    setLoadingAge(true);
+    setAgeData(null);
+    appointmentApi.get(`/analytics/age-distribution?v=1${mineParam}`)
+      .then(r => setAgeData(r.data?.distribution ?? []))
+      .catch(() => setAgeData([]))
+      .finally(() => setLoadingAge(false));
+  }, [mineParam]);
 
   useEffect(() => {
     if (!isDoctor) return;
@@ -246,6 +257,35 @@ export default function AnalyticsPage() {
                 <Tooltip formatter={(v: number, k: string, item: any) => [`${v} patients (${item?.payload?.percentage ?? 0}%)`, k]} />
               </PieChart>
             </ResponsiveContainer>
+          )}
+        </div>
+      )}
+
+      {/* Age Distribution */}
+      {(ageData && ageData.length > 0) && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-6">
+          <div className="mb-5">
+            <h2 className="text-base font-semibold text-gray-900">Patient Age Distribution</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Breakdown of {mineOnly ? 'your' : 'all'} patients by age group</p>
+          </div>
+          {loadingAge ? <LoadingSpinner /> : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {ageData.map((bucket, i) => (
+                <div key={bucket.ageGroup} className="text-center p-4 rounded-xl border border-gray-100 bg-gray-50">
+                  <div
+                    className="w-full rounded-lg mb-2 mx-auto"
+                    style={{
+                      height: `${Math.max(8, Math.round(bucket.percentage * 1.2))}px`,
+                      backgroundColor: PALETTE[i % PALETTE.length],
+                      opacity: 0.85,
+                    }}
+                  />
+                  <p className="text-xl font-bold text-gray-900">{bucket.count}</p>
+                  <p className="text-xs font-medium text-gray-600 mt-0.5">{bucket.ageGroup} yrs</p>
+                  <p className="text-xs text-gray-400">{bucket.percentage}%</p>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
