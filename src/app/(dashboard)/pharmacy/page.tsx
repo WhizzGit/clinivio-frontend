@@ -2,6 +2,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { appointmentApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
+  const csv = [headers.join(','), ...rows.map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
 
 interface PharmacyOrder {
   id: string;
@@ -602,10 +611,20 @@ interface PharmacyAnalytics {
   };
   orders: { dispensedToday: number; dispensedMTD: number; pending: number; revenueMTD: number };
 }
+interface PharmacyDashboard {
+  period: number; totalRevenue: number; totalInvoices: number;
+  dailyRevenue: { date: string; orders: number; revenue: number }[];
+  expiryTimeline: { month: string; count: number; value: number }[];
+}
+
+const PALETTE_PH = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
 
 function PharmacyAnalyticsTab() {
   const [data, setData] = useState<PharmacyAnalytics | null>(null);
+  const [dashboard, setDashboard] = useState<PharmacyDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dashLoading, setDashLoading] = useState(true);
+  const [period, setPeriod] = useState('30');
 
   useEffect(() => {
     appointmentApi.get('/stats/pharmacy')
@@ -614,13 +633,22 @@ function PharmacyAnalyticsTab() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading analytics…</div>;
-  if (!data) return <div className="text-center text-gray-400 py-12">Analytics unavailable</div>;
+  useEffect(() => {
+    setDashLoading(true);
+    appointmentApi.get(`/pharmacy/analytics/dashboard?days=${period}`)
+      .then(r => setDashboard(r.data))
+      .catch(() => setDashboard(null))
+      .finally(() => setDashLoading(false));
+  }, [period]);
 
   const fmt = (n: number | undefined | null) => {
     const v = Number(n ?? 0);
     return v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString('en-IN')}`;
   };
+
+  if (loading) return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading analytics…</div>;
+  if (!data) return <div className="text-center text-gray-400 py-12">Analytics unavailable</div>;
+
   const inv = Object.assign(
     { totalItems: 0, inventoryValue: 0, lowStockCount: 0, lowStockValue: 0, expiringSoonCount: 0, expiringSoonValue: 0, categoryBreakdown: {} as Record<string, { count: number; value: number }> },
     data.inventory ?? {},
@@ -634,6 +662,77 @@ function PharmacyAnalyticsTab() {
 
   return (
     <div className="space-y-6">
+      {/* Period selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500">Revenue period:</span>
+        {[{ label: '30 days', value: '30' }, { label: '90 days', value: '90' }, { label: '6 months', value: '180' }].map(p => (
+          <button key={p.value} onClick={() => setPeriod(p.value)}
+            className={`px-3 py-1 text-xs rounded-lg border transition-colors ${period === p.value ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 border-gray-300 hover:border-indigo-400'}`}>
+            {p.label}
+          </button>
+        ))}
+        {dashboard && (
+          <button onClick={() => downloadCSV('pharmacy-revenue.csv',
+            ['Date', 'Orders', 'Revenue (₹)'],
+            dashboard.dailyRevenue.map(d => [d.date, d.orders, d.revenue]))}
+            className="ml-auto text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Export CSV
+          </button>
+        )}
+      </div>
+
+      {/* Revenue trend + expiry timeline */}
+      {!dashLoading && dashboard && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Revenue Trend</h3>
+            <p className="text-xs text-gray-500 mb-3">Last {period} days · {fmt(dashboard.totalRevenue)} total · {dashboard.totalInvoices} invoices</p>
+            {dashboard.dailyRevenue.length > 1 ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={dashboard.dailyRevenue} margin={{ top: 4, right: 8, bottom: 20, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 9 }} angle={-45} textAnchor="end" interval={Math.floor(dashboard.dailyRevenue.length / 8)} />
+                  <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+                  <Tooltip formatter={(v: number) => [`₹${v.toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Line type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-44 text-gray-400 text-sm">No invoices in this period</div>
+            )}
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Expiry Timeline</h3>
+            <p className="text-xs text-gray-500 mb-3">Items expiring in the next 6 months by month</p>
+            {dashboard.expiryTimeline.length > 0 ? (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {dashboard.expiryTimeline.map((m, i) => {
+                  const maxCount = Math.max(...dashboard.expiryTimeline.map(x => x.count), 1);
+                  return (
+                    <div key={m.month}>
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className="text-gray-700 font-medium">{new Date(m.month + '-01').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
+                        <div className="flex gap-3 text-gray-500">
+                          <span>{m.count} item{m.count !== 1 ? 's' : ''}</span>
+                          <span className="font-semibold text-gray-900">{fmt(m.value)}</span>
+                        </div>
+                      </div>
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${Math.round(m.count / maxCount * 100)}%`, backgroundColor: PALETTE_PH[i % PALETTE_PH.length] }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-44 text-gray-400 text-sm">No items expiring soon</div>
+            )}
+          </div>
+        </div>
+      )}
+      {dashLoading && <div className="flex items-center justify-center h-24 text-gray-400 text-sm">Loading revenue data…</div>}
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -724,6 +823,72 @@ function PharmacyAnalyticsTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ReorderModal({ item, onClose, onSaved }: { item: InventoryItem; onClose: () => void; onSaved: () => void }) {
+  const [vendor, setVendor] = useState('');
+  const [qty, setQty] = useState(String(item.reorderLevel * 2 || 100));
+  const [price, setPrice] = useState('0');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!vendor.trim()) { setError('Vendor name is required'); return; }
+    setSaving(true);
+    try {
+      await appointmentApi.post('/pharmacy/purchases', {
+        vendorName: vendor.trim(),
+        purchaseDate: new Date().toISOString().split('T')[0],
+        items: [{ inventoryId: item.id, medicineName: item.name, quantity: parseInt(qty), purchasePrice: parseFloat(price) }],
+      });
+      onSaved(); onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e?.response?.data?.message || 'Reorder failed');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Reorder Stock</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm">
+            <p className="font-medium text-gray-900">{item.name}</p>
+            <p className="text-xs text-amber-700 mt-0.5">Current stock: {item.stockQty} {item.unit} · Reorder level: {item.reorderLevel}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Vendor / Supplier *</label>
+            <input required value={vendor} onChange={e => setVendor(e.target.value)} placeholder="e.g. ABC Pharma Distributors"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Qty to Order *</label>
+              <input type="number" min="1" required value={qty} onChange={e => setQty(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Purchase Price (₹)</label>
+              <input type="number" step="0.01" min="0" value={price} onChange={e => setPrice(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-60">
+              {saving ? 'Placing…' : 'Place Reorder'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -1180,6 +1345,8 @@ function PharmacyPurchasesTab({ isAdmin }: { isAdmin: boolean }) {
 export default function PharmacyPage() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'PHARMACIST';
+  const isDoctor = user?.role === 'DOCTOR';
+  const canReorder = isAdmin || isDoctor;
   const [tab, setTab] = useState<'orders' | 'inventory' | 'analytics' | 'purchases' | 'settings'>('orders');
 
   // Orders state
@@ -1252,6 +1419,7 @@ export default function PharmacyPage() {
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [invModal, setInvModal] = useState<{ open: boolean; item: Partial<InventoryItem> | null }>({ open: false, item: null });
   const [stockModal, setStockModal] = useState<InventoryItem | null>(null);
+  const [reorderModal, setReorderModal] = useState<InventoryItem | null>(null);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -1629,6 +1797,12 @@ export default function PharmacyPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
                               </svg>
                             </button>
+                            {canReorder && isLow && (
+                              <button onClick={() => setReorderModal(item)} title="Place reorder"
+                                className="p-1.5 rounded-lg text-amber-400 hover:text-amber-700 hover:bg-amber-50 transition-colors">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                              </button>
+                            )}
                             {isAdmin && (
                               <>
                                 <button
@@ -1852,6 +2026,13 @@ export default function PharmacyPage() {
           order={dispenseModal}
           onClose={() => setDispenseModal(null)}
           onDone={() => { fetchOrders(); setSelected(null); }}
+        />
+      )}
+      {reorderModal && (
+        <ReorderModal
+          item={reorderModal}
+          onClose={() => setReorderModal(null)}
+          onSaved={() => { setReorderModal(null); fetchInventory(); }}
         />
       )}
     </div>
