@@ -5,6 +5,9 @@ import { patientApi, appointmentApi, billingApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { generateReceiptHtml, printDocument } from '@/lib/print';
 import { cn } from '@/lib/utils';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from 'recharts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -368,7 +371,22 @@ function NewApptModal({ patientId, onClose, onSuccess }: {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'history' | 'billing';
+interface PatientTrends {
+  vitals: Array<{
+    date: string;
+    bpSystolic: number | null; bpDiastolic: number | null;
+    pulseRate: number | null; spo2: number | null;
+    bmi: number | null; rbsMgDl: number | null;
+    temperature: number | null; weightKg: number | null;
+  }>;
+  labResults: Array<{
+    date: string; orderNumber: string; test: string;
+    result: string; unit: string; normalRange: string;
+    flag: 'NORMAL' | 'ABNORMAL' | 'CRITICAL' | null;
+  }>;
+}
+
+type Tab = 'overview' | 'history' | 'billing' | 'trends';
 
 export default function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -381,6 +399,8 @@ export default function PatientDetailPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [tab, setTab] = useState<Tab>('overview');
   const [loadingPatient, setLoadingPatient] = useState(true);
+  const [trendsData, setTrendsData] = useState<PatientTrends | null>(null);
+  const [loadingTrends, setLoadingTrends] = useState(false);
   const [loadingAppts, setLoadingAppts] = useState(false);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [editModal, setEditModal] = useState(false);
@@ -427,6 +447,14 @@ export default function PatientDetailPage() {
   useEffect(() => { fetchPatient(); }, [fetchPatient]);
   useEffect(() => { if (tab === 'history' || tab === 'billing') fetchAppointments(); }, [tab, fetchAppointments]);
   useEffect(() => { if (tab === 'billing') fetchInvoices(); }, [tab, fetchInvoices]);
+  useEffect(() => {
+    if (tab !== 'trends' || !id) return;
+    setLoadingTrends(true);
+    appointmentApi.get(`/analytics/patient-trends/${id}`)
+      .then(r => setTrendsData(r.data))
+      .catch(() => setTrendsData(null))
+      .finally(() => setLoadingTrends(false));
+  }, [tab, id]);
   useEffect(() => {
     appointmentApi.get('/analytics/common-conditions')
       .then(r => setCommonConditions(r.data?.conditions ?? [])).catch(() => {});
@@ -629,11 +657,11 @@ export default function PatientDetailPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
-        {(['overview', 'history', 'billing'] as Tab[]).map(t => (
+        {(['overview', 'history', 'trends', 'billing'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={cn('px-5 py-1.5 text-sm font-medium rounded-lg transition-colors',
+            className={cn('px-4 py-1.5 text-sm font-medium rounded-lg transition-colors',
               tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
-            {t === 'history' ? 'Appointment History' : t === 'billing' ? 'Billing' : 'Overview'}
+            {t === 'history' ? 'History' : t === 'billing' ? 'Billing' : t === 'trends' ? 'Trends' : 'Overview'}
           </button>
         ))}
       </div>
@@ -812,6 +840,100 @@ export default function PatientDetailPage() {
                 </tr>
               </tfoot>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* Trends tab */}
+      {tab === 'trends' && (
+        <div className="space-y-5">
+          {loadingTrends ? (
+            <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading trends…</div>
+          ) : !trendsData || (trendsData.vitals.length === 0 && trendsData.labResults.length === 0) ? (
+            <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+              <p className="text-4xl mb-2">📈</p>
+              <p className="text-sm">No vital or lab data recorded yet</p>
+              <p className="text-xs mt-1 text-gray-300">Data appears after consultations and lab orders</p>
+            </div>
+          ) : (
+            <>
+              {trendsData.vitals.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-200 p-5">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-1">Vitals Over Time</h3>
+                  <p className="text-xs text-gray-500 mb-4">{trendsData.vitals.length} visit{trendsData.vitals.length !== 1 ? 's' : ''} with readings</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-2">Blood Pressure &amp; Pulse Rate</p>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <LineChart data={trendsData.vitals} margin={{ top: 4, right: 8, bottom: 24, left: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                          <XAxis dataKey="date" tick={{ fontSize: 9 }} angle={-30} textAnchor="end" />
+                          <YAxis tick={{ fontSize: 9 }} />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="bpSystolic" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} name="Systolic" connectNulls />
+                          <Line type="monotone" dataKey="bpDiastolic" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} name="Diastolic" connectNulls />
+                          <Line type="monotone" dataKey="pulseRate" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="Pulse (bpm)" connectNulls />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-2">SpO₂ &amp; Blood Sugar</p>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <LineChart data={trendsData.vitals} margin={{ top: 4, right: 8, bottom: 24, left: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                          <XAxis dataKey="date" tick={{ fontSize: 9 }} angle={-30} textAnchor="end" />
+                          <YAxis tick={{ fontSize: 9 }} />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="spo2" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="SpO₂ (%)" connectNulls />
+                          <Line type="monotone" dataKey="rbsMgDl" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} name="RBS (mg/dL)" connectNulls />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {trendsData.labResults.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-200 p-5">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Lab Results History</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100 bg-gray-50">
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Test</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Result</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Normal Range</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Flag</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {trendsData.labResults.map((r, i) => (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+                              {new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </td>
+                            <td className="px-3 py-2 text-sm font-medium text-gray-900">{r.test}</td>
+                            <td className="px-3 py-2 text-sm text-gray-700">{r.result}{r.unit ? ` ${r.unit}` : ''}</td>
+                            <td className="px-3 py-2 text-xs text-gray-500">{r.normalRange || '—'}</td>
+                            <td className="px-3 py-2">
+                              {r.flag ? (
+                                <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full',
+                                  r.flag === 'CRITICAL' ? 'bg-red-100 text-red-700' :
+                                  r.flag === 'ABNORMAL' ? 'bg-amber-100 text-amber-700' :
+                                  'bg-green-100 text-green-700')}>
+                                  {r.flag}
+                                </span>
+                              ) : <span className="text-xs text-gray-400">—</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
