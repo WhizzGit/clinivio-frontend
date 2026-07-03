@@ -293,6 +293,17 @@ export default function LoginPage() {
                     "Sign In"
                   )}
                 </button>
+
+                {isHospitalLogin && (
+                  <p className="text-center">
+                    <a
+                      href={`/forgot-password${slugValue ? `?slug=${encodeURIComponent(slugValue)}` : ''}`}
+                      className="text-xs text-gray-500 hover:text-violet-600 transition-colors"
+                    >
+                      Forgot your password?
+                    </a>
+                  </p>
+                )}
               </form>
 
               <p className="text-center text-xs text-gray-400 pt-1">

@@ -755,7 +755,6 @@ function DeleteConfirmModal({ tenant, onClose, onConfirm, deleting }: {
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 space-y-1">
             <p className="font-semibold">This will permanently:</p>
             <ul className="list-disc list-inside space-y-0.5 text-xs">
-              <li>Drop the <span className="font-mono">tenant_{tenant.slug}</span> database schema</li>
               <li>Delete all patient records, appointments, and clinical data</li>
               <li>Remove the hospital&apos;s admin account</li>
               <li>Remove the tenant record from the platform</li>
