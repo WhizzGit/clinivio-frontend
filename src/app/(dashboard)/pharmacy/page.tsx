@@ -2,6 +2,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { appointmentApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+function downloadCSV(filename: string, headers: string[], rows: (string | number)[][]) {
+  const csv = [headers.join(','), ...rows.map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
 
 interface PharmacyOrder {
   id: string;
@@ -46,6 +55,50 @@ interface InventoryItem {
   manufacturer?: string;
   hsn?: string;
   isActive: boolean;
+}
+
+interface PharmacyAlerts {
+  lowStock: Array<{ id: string; name: string; stockQty: number; reorderLevel: number; unit: string }>;
+  expiring: Array<{ id: string; name: string; stockQty: number; unit: string; expiryDate: string; batchNo?: string }>;
+}
+
+interface PharmacyPurchase {
+  id: string;
+  vendorName: string;
+  invoiceNo: string | null;
+  purchaseDate: string;
+  totalAmount: number;
+  discountAmount: number;
+  notes?: string | null;
+  createdAt: string;
+  items: Array<{
+    id: string;
+    medicineName: string;
+    batchNo?: string;
+    expiryDate?: string;
+    quantity: number;
+    freeQty: number;
+    purchasePrice: number;
+    mrp: number;
+    sellingPrice: number;
+    discountPercent: number;
+    gstRate: number;
+    lineTotal: number;
+  }>;
+}
+
+interface PurchaseItemForm {
+  inventoryId: string;
+  medicineName: string;
+  batchNo: string;
+  expiryDate: string;
+  quantity: number;
+  freeQty: number;
+  purchasePrice: number;
+  mrp: number;
+  sellingPrice: number;
+  discountPercent: number;
+  gstRate: number;
 }
 
 const STATUS_CONFIG = {
@@ -558,10 +611,20 @@ interface PharmacyAnalytics {
   };
   orders: { dispensedToday: number; dispensedMTD: number; pending: number; revenueMTD: number };
 }
+interface PharmacyDashboard {
+  period: number; totalRevenue: number; totalInvoices: number;
+  dailyRevenue: { date: string; orders: number; revenue: number }[];
+  expiryTimeline: { month: string; count: number; value: number }[];
+}
+
+const PALETTE_PH = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
 
 function PharmacyAnalyticsTab() {
   const [data, setData] = useState<PharmacyAnalytics | null>(null);
+  const [dashboard, setDashboard] = useState<PharmacyDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dashLoading, setDashLoading] = useState(true);
+  const [period, setPeriod] = useState('30');
 
   useEffect(() => {
     appointmentApi.get('/stats/pharmacy')
@@ -570,13 +633,22 @@ function PharmacyAnalyticsTab() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading analytics…</div>;
-  if (!data) return <div className="text-center text-gray-400 py-12">Analytics unavailable</div>;
+  useEffect(() => {
+    setDashLoading(true);
+    appointmentApi.get(`/pharmacy/analytics/dashboard?days=${period}`)
+      .then(r => setDashboard(r.data))
+      .catch(() => setDashboard(null))
+      .finally(() => setDashLoading(false));
+  }, [period]);
 
   const fmt = (n: number | undefined | null) => {
     const v = Number(n ?? 0);
     return v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString('en-IN')}`;
   };
+
+  if (loading) return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading analytics…</div>;
+  if (!data) return <div className="text-center text-gray-400 py-12">Analytics unavailable</div>;
+
   const inv = Object.assign(
     { totalItems: 0, inventoryValue: 0, lowStockCount: 0, lowStockValue: 0, expiringSoonCount: 0, expiringSoonValue: 0, categoryBreakdown: {} as Record<string, { count: number; value: number }> },
     data.inventory ?? {},
@@ -590,6 +662,77 @@ function PharmacyAnalyticsTab() {
 
   return (
     <div className="space-y-6">
+      {/* Period selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500">Revenue period:</span>
+        {[{ label: '30 days', value: '30' }, { label: '90 days', value: '90' }, { label: '6 months', value: '180' }].map(p => (
+          <button key={p.value} onClick={() => setPeriod(p.value)}
+            className={`px-3 py-1 text-xs rounded-lg border transition-colors ${period === p.value ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 border-gray-300 hover:border-indigo-400'}`}>
+            {p.label}
+          </button>
+        ))}
+        {dashboard && (
+          <button onClick={() => downloadCSV('pharmacy-revenue.csv',
+            ['Date', 'Orders', 'Revenue (₹)'],
+            dashboard.dailyRevenue.map(d => [d.date, d.orders, d.revenue]))}
+            className="ml-auto text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Export CSV
+          </button>
+        )}
+      </div>
+
+      {/* Revenue trend + expiry timeline */}
+      {!dashLoading && dashboard && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Revenue Trend</h3>
+            <p className="text-xs text-gray-500 mb-3">Last {period} days · {fmt(dashboard.totalRevenue)} total · {dashboard.totalInvoices} invoices</p>
+            {dashboard.dailyRevenue.length > 1 ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={dashboard.dailyRevenue} margin={{ top: 4, right: 8, bottom: 20, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 9 }} angle={-45} textAnchor="end" interval={Math.floor(dashboard.dailyRevenue.length / 8)} />
+                  <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+                  <Tooltip formatter={(v: number) => [`₹${v.toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Line type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-44 text-gray-400 text-sm">No invoices in this period</div>
+            )}
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Expiry Timeline</h3>
+            <p className="text-xs text-gray-500 mb-3">Items expiring in the next 6 months by month</p>
+            {dashboard.expiryTimeline.length > 0 ? (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {dashboard.expiryTimeline.map((m, i) => {
+                  const maxCount = Math.max(...dashboard.expiryTimeline.map(x => x.count), 1);
+                  return (
+                    <div key={m.month}>
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className="text-gray-700 font-medium">{new Date(m.month + '-01').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
+                        <div className="flex gap-3 text-gray-500">
+                          <span>{m.count} item{m.count !== 1 ? 's' : ''}</span>
+                          <span className="font-semibold text-gray-900">{fmt(m.value)}</span>
+                        </div>
+                      </div>
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${Math.round(m.count / maxCount * 100)}%`, backgroundColor: PALETTE_PH[i % PALETTE_PH.length] }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-44 text-gray-400 text-sm">No items expiring soon</div>
+            )}
+          </div>
+        </div>
+      )}
+      {dashLoading && <div className="flex items-center justify-center h-24 text-gray-400 text-sm">Loading revenue data…</div>}
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
@@ -684,10 +827,527 @@ function PharmacyAnalyticsTab() {
   );
 }
 
+function ReorderModal({ item, onClose, onSaved }: { item: InventoryItem; onClose: () => void; onSaved: () => void }) {
+  const [vendor, setVendor] = useState('');
+  const [qty, setQty] = useState(String(item.reorderLevel * 2 || 100));
+  const [price, setPrice] = useState('0');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!vendor.trim()) { setError('Vendor name is required'); return; }
+    setSaving(true);
+    try {
+      await appointmentApi.post('/pharmacy/purchases', {
+        vendorName: vendor.trim(),
+        purchaseDate: new Date().toISOString().split('T')[0],
+        items: [{ inventoryId: item.id, medicineName: item.name, quantity: parseInt(qty), purchasePrice: parseFloat(price) }],
+      });
+      onSaved(); onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e?.response?.data?.message || 'Reorder failed');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Reorder Stock</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm">
+            <p className="font-medium text-gray-900">{item.name}</p>
+            <p className="text-xs text-amber-700 mt-0.5">Current stock: {item.stockQty} {item.unit} · Reorder level: {item.reorderLevel}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Vendor / Supplier *</label>
+            <input required value={vendor} onChange={e => setVendor(e.target.value)} placeholder="e.g. ABC Pharma Distributors"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Qty to Order *</label>
+              <input type="number" min="1" required value={qty} onChange={e => setQty(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Purchase Price (₹)</label>
+              <input type="number" step="0.01" min="0" value={price} onChange={e => setPrice(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-60">
+              {saving ? 'Placing…' : 'Place Reorder'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PharmacyAlertBanner() {
+  const { user } = useAuthStore();
+  const [alerts, setAlerts] = useState<PharmacyAlerts | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    appointmentApi.get('/pharmacy/alerts')
+      .then(r => setAlerts(r.data))
+      .catch(() => {});
+  }, []);
+
+  const canSeeAlerts = ['ADMIN', 'PHARMACIST', 'DOCTOR'].includes(user?.role ?? '');
+  if (!canSeeAlerts || dismissed || !alerts) return null;
+
+  const lowStockCount = alerts.lowStock?.length ?? 0;
+  const expiringCount = alerts.expiring?.length ?? 0;
+  const total = lowStockCount + expiringCount;
+  if (total === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="text-amber-500 text-lg mt-0.5">⚠️</span>
+          <div>
+            <p className="text-sm font-semibold text-amber-900">Pharmacy Alerts</p>
+            <div className="mt-1 flex flex-wrap gap-3">
+              {lowStockCount > 0 && (
+                <span className="text-xs text-amber-800">
+                  <span className="font-bold">{lowStockCount}</span> medicine{lowStockCount !== 1 ? 's' : ''} below reorder level
+                  {alerts.lowStock.slice(0, 3).map(m => (
+                    <span key={m.id} className="ml-1 px-1.5 py-0.5 bg-amber-100 rounded text-amber-700 font-medium">{m.name} ({m.stockQty} {m.unit})</span>
+                  ))}
+                  {lowStockCount > 3 && <span className="ml-1 text-amber-600">+{lowStockCount - 3} more</span>}
+                </span>
+              )}
+              {expiringCount > 0 && (
+                <span className="text-xs text-red-800">
+                  <span className="font-bold">{expiringCount}</span> item{expiringCount !== 1 ? 's' : ''} expiring within 3 months
+                  {alerts.expiring.slice(0, 2).map(m => (
+                    <span key={m.id} className="ml-1 px-1.5 py-0.5 bg-red-100 rounded text-red-700 font-medium">{m.name}</span>
+                  ))}
+                  {expiringCount > 2 && <span className="ml-1 text-red-600">+{expiringCount - 2} more</span>}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setDismissed(true)} className="p-1 text-amber-400 hover:text-amber-700 flex-shrink-0">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PurchaseModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const EMPTY_PI: PurchaseItemForm = {
+    inventoryId: '', medicineName: '', batchNo: '', expiryDate: '',
+    quantity: 1, freeQty: 0, purchasePrice: 0, mrp: 0, sellingPrice: 0,
+    discountPercent: 0, gstRate: 12,
+  };
+
+  const [header, setHeader] = useState({
+    vendorName: '', invoiceNo: '',
+    purchaseDate: new Date().toISOString().split('T')[0],
+    notes: '',
+  });
+  const [items, setItems] = useState<PurchaseItemForm[]>([{ ...EMPTY_PI }]);
+  const [suggestions, setSuggestions] = useState<Record<number, InventoryItem[]>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const timers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  const lineTotal = (it: PurchaseItemForm) =>
+    Math.round(it.quantity * it.purchasePrice * (1 - it.discountPercent / 100) * 100) / 100;
+
+  const totalAmount = items.reduce((s, it) => s + lineTotal(it), 0);
+  const totalDiscount = items.reduce((s, it) =>
+    s + Math.round(it.quantity * it.purchasePrice * (it.discountPercent / 100) * 100) / 100, 0);
+
+  function searchInv(idx: number, q: string) {
+    if (timers.current[idx]) clearTimeout(timers.current[idx]);
+    if (!q || q.length < 2) { setSuggestions(p => ({ ...p, [idx]: [] })); return; }
+    timers.current[idx] = setTimeout(async () => {
+      try {
+        const r = await appointmentApi.get(`/pharmacy/inventory?q=${encodeURIComponent(q)}&limit=5`);
+        setSuggestions(p => ({ ...p, [idx]: Array.isArray(r.data) ? r.data : (r.data?.data ?? []) }));
+      } catch { /* ignore */ }
+    }, 300);
+  }
+
+  function pickInv(idx: number, inv: InventoryItem) {
+    setItems(prev => prev.map((it, i) => i !== idx ? it : {
+      ...it, inventoryId: inv.id, medicineName: inv.name,
+      mrp: Number(inv.mrp), sellingPrice: Number(inv.sellingPrice),
+      batchNo: inv.batchNo || '', expiryDate: inv.expiryDate ? inv.expiryDate.split('T')[0] : '',
+    }));
+    setSuggestions(p => ({ ...p, [idx]: [] }));
+  }
+
+  const upd = (idx: number, field: keyof PurchaseItemForm, val: string | number) =>
+    setItems(prev => prev.map((it, i) => i !== idx ? it : { ...it, [field]: val }));
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!header.vendorName.trim()) { setError('Vendor name is required'); return; }
+    if (items.some(it => !it.medicineName.trim())) { setError('All items must have a medicine name'); return; }
+    setSaving(true);
+    try {
+      await appointmentApi.post('/pharmacy/purchases', {
+        ...header,
+        items: items.map(it => ({ ...it, lineTotal: lineTotal(it) })),
+      });
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e?.response?.data?.message || 'Failed to save purchase');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="font-semibold text-gray-900">Record Purchase Invoice</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Log incoming stock from vendor</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Vendor / Supplier *</label>
+                <input required value={header.vendorName} onChange={e => setHeader(p => ({ ...p, vendorName: e.target.value }))}
+                  placeholder="ABC Pharma Distributors"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Invoice No.</label>
+                <input value={header.invoiceNo} onChange={e => setHeader(p => ({ ...p, invoiceNo: e.target.value }))}
+                  placeholder="INV-2025-0042"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Purchase Date</label>
+                <input type="date" value={header.purchaseDate} onChange={e => setHeader(p => ({ ...p, purchaseDate: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Line Items</h3>
+                <button type="button" onClick={() => setItems(p => [...p, { ...EMPTY_PI }])}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Add row</button>
+              </div>
+              <div className="space-y-2">
+                {items.map((item, idx) => (
+                  <div key={idx} className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-400 w-5 flex-shrink-0">#{idx + 1}</span>
+                      <div className="flex-1 relative">
+                        {item.inventoryId ? (
+                          <div className="flex items-center justify-between bg-white border border-green-300 rounded-lg px-3 py-2">
+                            <p className="text-sm font-medium text-gray-900">{item.medicineName}</p>
+                            <button type="button" onClick={() => upd(idx, 'inventoryId', '')}
+                              className="text-xs text-gray-400 hover:text-gray-700 ml-2">Change</button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              value={item.medicineName}
+                              onChange={e => {
+                                upd(idx, 'medicineName', e.target.value);
+                                searchInv(idx, e.target.value);
+                              }}
+                              onBlur={() => setTimeout(() => setSuggestions(p => ({ ...p, [idx]: [] })), 200)}
+                              placeholder="Medicine name or search inventory…"
+                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            {(suggestions[idx] ?? []).length > 0 && (
+                              <div className="absolute z-20 left-0 right-0 top-full mt-0.5 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                                {suggestions[idx].map(s => (
+                                  <button key={s.id} type="button" onMouseDown={() => pickInv(idx, s)}
+                                    className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-50 last:border-0 text-sm">
+                                    <span className="font-medium">{s.name}</span>
+                                    {s.genericName && <span className="text-gray-400 ml-2 text-xs">{s.genericName}</span>}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {items.length > 1 && (
+                        <button type="button" onClick={() => setItems(p => p.filter((_, i) => i !== idx))}
+                          className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg flex-shrink-0">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-4 md:grid-cols-8 gap-2 pl-7">
+                      {([
+                        { label: 'Batch No', field: 'batchNo', type: 'text', placeholder: 'BT001' },
+                        { label: 'Expiry', field: 'expiryDate', type: 'date', placeholder: '' },
+                        { label: 'Qty', field: 'quantity', type: 'number', placeholder: '100' },
+                        { label: 'Free Qty', field: 'freeQty', type: 'number', placeholder: '0' },
+                        { label: 'Purchase ₹', field: 'purchasePrice', type: 'number', placeholder: '0.00' },
+                        { label: 'MRP ₹', field: 'mrp', type: 'number', placeholder: '0.00' },
+                        { label: 'Selling ₹', field: 'sellingPrice', type: 'number', placeholder: '0.00' },
+                        { label: 'Disc %', field: 'discountPercent', type: 'number', placeholder: '0' },
+                      ] as const).map(({ label, field, type, placeholder }) => (
+                        <div key={field}>
+                          <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                          <input
+                            type={type} placeholder={placeholder}
+                            value={item[field]}
+                            step={type === 'number' ? '0.01' : undefined}
+                            min={type === 'number' ? '0' : undefined}
+                            onChange={e => upd(idx, field, type === 'number' ? Number(e.target.value) : e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pl-7 flex justify-end">
+                      <span className="text-xs text-gray-500">
+                        Line total: <span className="font-semibold text-gray-900">₹{r2(lineTotal(item)).toFixed(2)}</span>
+                        {item.freeQty > 0 && <span className="ml-2 text-green-600">+{item.freeQty} free units</span>}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Notes <span className="text-gray-400 font-normal">(optional)</span></label>
+                <textarea rows={3} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))}
+                  placeholder="Received in good condition, return policy 30 days…"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              </div>
+              <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-4 flex flex-col justify-center space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Sub-total (before discount)</span>
+                  <span className="font-medium text-gray-900">₹{r2(totalAmount + totalDiscount).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Total Discount</span>
+                  <span className="font-medium text-green-700">−₹{r2(totalDiscount).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-base font-bold border-t border-indigo-200 pt-2">
+                  <span className="text-gray-900">Invoice Total</span>
+                  <span className="text-indigo-700">₹{r2(totalAmount).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700">{error}</div>
+            )}
+          </div>
+
+          <div className="px-6 py-4 border-t border-gray-100 flex gap-3">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 text-sm border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2.5 text-sm bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-60 flex items-center justify-center gap-2">
+              {saving && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+              {saving ? 'Saving…' : `Save Purchase · ₹${r2(totalAmount).toFixed(2)}`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PharmacyPurchasesTab({ isAdmin }: { isAdmin: boolean }) {
+  const [purchases, setPurchases] = useState<PharmacyPurchase[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [selected, setSelected] = useState<PharmacyPurchase | null>(null);
+
+  const fetchPurchases = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await appointmentApi.get('/pharmacy/purchases');
+      setPurchases(Array.isArray(res.data) ? res.data : (res.data?.data ?? []));
+    } catch {
+      setPurchases([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchPurchases(); }, [fetchPurchases]);
+
+  const fmt = (n: number) => {
+    const v = Number(n ?? 0);
+    return v >= 100000 ? `₹${(v / 100000).toFixed(1)}L` : `₹${v.toLocaleString('en-IN')}`;
+  };
+
+  return (
+    <div className="flex gap-6">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-700">Purchase History</h2>
+          <div className="flex gap-2">
+            <button onClick={fetchPurchases} className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">Refresh</button>
+            {isAdmin && (
+              <button onClick={() => setShowModal(true)}
+                className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                Record Purchase
+              </button>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading…</div>
+        ) : purchases.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+            <p className="text-3xl mb-2">🧾</p>
+            <p className="text-sm">No purchase invoices recorded yet</p>
+            {isAdmin && (
+              <button onClick={() => setShowModal(true)} className="mt-3 px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                Record first purchase
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Vendor</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Items</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Discount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {purchases.map(p => (
+                  <tr key={p.id} onClick={() => setSelected(p === selected ? null : p)}
+                    className={`hover:bg-gray-50 cursor-pointer transition-colors ${selected?.id === p.id ? 'bg-blue-50' : ''}`}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-900">{p.invoiceNo || '—'}</p>
+                      {p.notes && <p className="text-xs text-gray-400 truncate max-w-[120px]">{p.notes}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">{p.vendorName}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">
+                      {new Date(p.purchaseDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-600">{p.items?.length ?? 0}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(p.totalAmount)}</td>
+                    <td className="px-4 py-3 text-right text-green-700">{p.discountAmount > 0 ? `−${fmt(p.discountAmount)}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="w-80 flex-shrink-0">
+        <div className="bg-white rounded-xl border border-gray-200 p-5 sticky top-0 max-h-[80vh] overflow-y-auto">
+          <h2 className="font-semibold text-gray-900 mb-4">Purchase Detail</h2>
+          {!selected ? (
+            <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+              <p className="text-3xl mb-2">🧾</p>
+              <p className="text-sm text-center">Select a purchase to view details</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100 space-y-1">
+                <p className="font-semibold text-gray-900 text-sm">{selected.vendorName}</p>
+                {selected.invoiceNo && <p className="text-xs text-gray-500">Invoice: {selected.invoiceNo}</p>}
+                <p className="text-xs text-gray-500">
+                  {new Date(selected.purchaseDate).toLocaleDateString('en-IN', { dateStyle: 'long' })}
+                </p>
+                {selected.notes && <p className="text-xs text-gray-600 italic mt-1">{selected.notes}</p>}
+              </div>
+              <div>
+                <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Items</h3>
+                <div className="space-y-2">
+                  {(selected.items ?? []).map((item, i) => (
+                    <div key={i} className="p-2.5 bg-gray-50 rounded-lg text-xs">
+                      <div className="flex justify-between">
+                        <p className="font-medium text-gray-900">{item.medicineName}</p>
+                        <p className="text-gray-600">₹{Number(item.lineTotal).toFixed(2)}</p>
+                      </div>
+                      <div className="text-gray-500 mt-0.5 space-y-0.5">
+                        <p>Qty: {item.quantity}{item.freeQty > 0 ? ` + ${item.freeQty} free` : ''} · Purchase: ₹{Number(item.purchasePrice).toFixed(2)}</p>
+                        {item.batchNo && <p>Batch: {item.batchNo}</p>}
+                        {item.expiryDate && <p>Exp: {new Date(item.expiryDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</p>}
+                        {item.discountPercent > 0 && <p className="text-green-600">Discount: {item.discountPercent}%</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="border-t border-gray-100 pt-3 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Invoice Total</span>
+                  <span className="font-bold text-gray-900">₹{Number(selected.totalAmount).toFixed(2)}</span>
+                </div>
+                {selected.discountAmount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Discount Saved</span>
+                    <span className="text-green-700">−₹{Number(selected.discountAmount).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showModal && (
+        <PurchaseModal
+          onClose={() => setShowModal(false)}
+          onSaved={fetchPurchases}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function PharmacyPage() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'PHARMACIST';
-  const [tab, setTab] = useState<'orders' | 'inventory' | 'analytics' | 'settings'>('orders');
+  const isDoctor = user?.role === 'DOCTOR';
+  const canReorder = isAdmin || isDoctor;
+  const [tab, setTab] = useState<'orders' | 'inventory' | 'analytics' | 'purchases' | 'settings'>('orders');
 
   // Orders state
   const [orders, setOrders] = useState<PharmacyOrder[]>([]);
@@ -759,6 +1419,7 @@ export default function PharmacyPage() {
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [invModal, setInvModal] = useState<{ open: boolean; item: Partial<InventoryItem> | null }>({ open: false, item: null });
   const [stockModal, setStockModal] = useState<InventoryItem | null>(null);
+  const [reorderModal, setReorderModal] = useState<InventoryItem | null>(null);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -840,7 +1501,7 @@ export default function PharmacyPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Pharmacy</h1>
           <p className="text-sm text-gray-500">
-            {tab === 'orders' ? 'Dispense prescriptions from completed consultations' : tab === 'inventory' ? 'Manage medicine inventory and stock levels' : tab === 'analytics' ? 'Cost analysis, inventory health, and dispensing trends' : 'Pharmacy profile for printing on bills and receipts'}
+            {tab === 'orders' ? 'Dispense prescriptions from completed consultations' : tab === 'inventory' ? 'Manage medicine inventory and stock levels' : tab === 'analytics' ? 'Cost analysis, inventory health, and dispensing trends' : tab === 'purchases' ? 'Purchase invoices and incoming stock from vendors' : 'Pharmacy profile for printing on bills and receipts'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -849,9 +1510,10 @@ export default function PharmacyPage() {
               { key: 'orders', label: 'Orders' },
               { key: 'inventory', label: 'Inventory' },
               { key: 'analytics', label: 'Analytics' },
+              { key: 'purchases', label: 'Purchases' },
               { key: 'settings', label: 'Settings' },
             ].map(t => (
-              <button key={t.key} onClick={() => setTab(t.key as 'orders' | 'inventory' | 'analytics' | 'settings')}
+              <button key={t.key} onClick={() => setTab(t.key as 'orders' | 'inventory' | 'analytics' | 'purchases' | 'settings')}
                 className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ${tab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                 {t.label}
               </button>
@@ -859,6 +1521,8 @@ export default function PharmacyPage() {
           </div>
         </div>
       </div>
+
+      <PharmacyAlertBanner />
 
       {/* ── ORDERS TAB ── */}
       {tab === 'orders' && (
@@ -1133,6 +1797,12 @@ export default function PharmacyPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
                               </svg>
                             </button>
+                            {canReorder && isLow && (
+                              <button onClick={() => setReorderModal(item)} title="Place reorder"
+                                className="p-1.5 rounded-lg text-amber-400 hover:text-amber-700 hover:bg-amber-50 transition-colors">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                              </button>
+                            )}
                             {isAdmin && (
                               <>
                                 <button
@@ -1169,6 +1839,9 @@ export default function PharmacyPage() {
 
       {/* ── ANALYTICS TAB ── */}
       {tab === 'analytics' && <PharmacyAnalyticsTab />}
+
+      {/* ── PURCHASES TAB ── */}
+      {tab === 'purchases' && <PharmacyPurchasesTab isAdmin={isAdmin} />}
 
       {/* ── SETTINGS TAB ── */}
       {tab === 'settings' && (
@@ -1353,6 +2026,13 @@ export default function PharmacyPage() {
           order={dispenseModal}
           onClose={() => setDispenseModal(null)}
           onDone={() => { fetchOrders(); setSelected(null); }}
+        />
+      )}
+      {reorderModal && (
+        <ReorderModal
+          item={reorderModal}
+          onClose={() => setReorderModal(null)}
+          onSaved={() => { setReorderModal(null); fetchInventory(); }}
         />
       )}
     </div>

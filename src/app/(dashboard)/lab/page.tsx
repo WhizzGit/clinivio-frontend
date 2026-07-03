@@ -4,6 +4,7 @@ import { appointmentApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
 import { generateLabReportHtml, printDocument } from '@/lib/print';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface LabTest {
   id: string; name: string; code: string; category: string;
@@ -12,16 +13,24 @@ interface LabTest {
 interface LabOrderItem {
   id: string; labTestId: string; result?: string; unit?: string;
   normalRange?: string; flag?: 'NORMAL' | 'ABNORMAL' | 'CRITICAL'; notes?: string;
+  isOutsourced?: boolean; externalLabName?: string | null; externalReference?: string | null;
   labTest: { id: string; name: string; code: string; unit?: string; normalRange?: string; price: number };
 }
 interface LabOrder {
   id: string; orderNumber: string; status: string; priority: string;
   clinicalNotes?: string; sampleType?: string; collectedAt?: string;
   completedAt?: string; createdAt: string;
+  paymentStatus?: string; amountDue?: number; amountPaid?: number;
   patient: { id: string; firstName: string; lastName: string; uhid: string; phone: string };
   orderedBy: { firstName: string; lastName: string };
   assignedTo?: { firstName: string; lastName: string };
   items: LabOrderItem[];
+}
+interface LabReagent {
+  id: string; name: string; unit: string;
+  currentQty: string; reorderLevel: string; unitCost: string;
+  manufacturer?: string | null; batchNo?: string | null; expiryDate?: string | null;
+  isActive: boolean;
 }
 interface Stats { pending: number; sampleCollected: number; inProgress: number; completedToday: number; total: number }
 interface Analytics {
@@ -49,6 +58,139 @@ const CATEGORY_ICONS: Record<string, string> = {
   'Haematology': '🩸', 'Biochemistry': '🧪', 'Microbiology': '🦠',
   'Serology': '💉', 'Urine Analysis': '🔬', 'Radiology': '🩻', 'Other': '🧫',
 };
+
+// ── Payment Modal ─────────────────────────────────────────────────────────────
+function PaymentModal({ order, onClose, onSaved }: { order: LabOrder; onClose: () => void; onSaved: () => void }) {
+  const [method, setMethod] = useState<'CASH' | 'CARD' | 'UPI' | 'ONLINE'>('CASH');
+  const [amount, setAmount] = useState(String(order.amountDue ?? order.items.reduce((s, i) => s + Number(i.labTest.price), 0)));
+  const [waived, setWaived] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await appointmentApi.post(`/lab/orders/${order.id}/collect-payment`, {
+        paymentMethod: waived ? undefined : method,
+        amountPaid: waived ? 0 : parseFloat(amount),
+        waived,
+      });
+      onSaved(); onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e?.response?.data?.message || 'Payment collection failed');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Collect Payment</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm">
+            <p className="font-medium text-gray-900">{order.orderNumber}</p>
+            <p className="text-gray-500 text-xs">{order.patient.firstName} {order.patient.lastName} · {order.items.length} test(s)</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={waived} onChange={e => setWaived(e.target.checked)} className="rounded" />
+            Waive payment (insurance / free service)
+          </label>
+          {!waived && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Amount (₹) *</label>
+                <input type="number" step="0.01" min="0" required value={amount} onChange={e => setAmount(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Payment Method</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(['CASH', 'CARD', 'UPI', 'ONLINE'] as const).map(m => (
+                    <button key={m} type="button" onClick={() => setMethod(m)}
+                      className={`py-2 text-xs rounded-lg border transition-colors ${method === m ? 'bg-teal-600 text-white border-teal-600' : 'text-gray-600 border-gray-300 hover:border-teal-400'}`}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose} className="flex-1 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2 text-sm bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700 disabled:opacity-60">
+              {saving ? 'Saving…' : waived ? 'Waive' : `Collect ₹${parseFloat(amount || '0').toFixed(2)}`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Outsource Modal ───────────────────────────────────────────────────────────
+function OutsourceModal({ orderId, item, onClose, onSaved }: {
+  orderId: string; item: LabOrderItem; onClose: () => void; onSaved: () => void;
+}) {
+  const [labName, setLabName] = useState('');
+  const [reference, setReference] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!labName.trim()) { setError('External lab name is required'); return; }
+    setSaving(true);
+    try {
+      await appointmentApi.patch(`/lab/orders/${orderId}/items/${item.id}/outsource`, {
+        externalLabName: labName.trim(),
+        externalReference: reference.trim() || undefined,
+      });
+      onSaved(); onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e?.response?.data?.message || 'Failed');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Outsource to External Lab</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-3">
+          <div className="bg-gray-50 rounded-lg px-3 py-2 text-sm">
+            <p className="font-medium text-gray-900">{item.labTest.name}</p>
+            <p className="text-xs text-gray-400">{item.labTest.code}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">External Lab Name *</label>
+            <input required value={labName} onChange={e => setLabName(e.target.value)} placeholder="e.g. City Diagnostics"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Reference No. (optional)</label>
+            <input value={reference} onChange={e => setReference(e.target.value)} placeholder="External sample ID"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={saving} className="flex-1 py-2 text-sm bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700 disabled:opacity-60">
+              {saving ? 'Saving…' : 'Confirm'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 // ── Results Entry Modal ────────────────────────────────────────────────────────
 function ResultsModal({ order, onClose, onSaved }: { order: LabOrder; onClose: () => void; onSaved: () => void }) {
@@ -342,6 +484,8 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
   order: LabOrder; onClose: () => void; onRefresh: () => void; canEdit: boolean;
 }) {
   const [showResults, setShowResults] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
+  const [outsourceItem, setOutsourceItem] = useState<LabOrderItem | null>(null);
   const [actioning, setActioning] = useState(false);
   const { tenantProfile } = useAuthStore();
 
@@ -417,6 +561,15 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
         <ResultsModal order={order} onClose={() => setShowResults(false)}
           onSaved={() => { setShowResults(false); onRefresh(); onClose(); }} />
       )}
+      {showPayment && (
+        <PaymentModal order={order} onClose={() => setShowPayment(false)}
+          onSaved={() => { setShowPayment(false); onRefresh(); }} />
+      )}
+      {outsourceItem && (
+        <OutsourceModal orderId={order.id} item={outsourceItem}
+          onClose={() => setOutsourceItem(null)}
+          onSaved={() => { setOutsourceItem(null); onRefresh(); }} />
+      )}
       <div className="fixed inset-y-0 right-0 z-40 w-full max-w-md bg-white shadow-2xl flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
@@ -451,8 +604,25 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
           </div>
 
           <div className="bg-teal-50 rounded-xl p-3 flex items-center justify-between">
-            <span className="text-xs text-teal-700 font-medium">Billing Amount</span>
-            <span className="text-lg font-bold text-teal-800">₹{orderValue.toLocaleString('en-IN')}</span>
+            <div>
+              <span className="text-xs text-teal-700 font-medium">Billing Amount</span>
+              {order.paymentStatus && (
+                <span className={cn('ml-2 text-xs font-semibold px-1.5 py-0.5 rounded-full',
+                  order.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' :
+                  order.paymentStatus === 'WAIVED' ? 'bg-gray-100 text-gray-600' :
+                  'bg-orange-100 text-orange-700')}>
+                  {order.paymentStatus === 'PAID' ? '✓ Paid' : order.paymentStatus === 'WAIVED' ? 'Waived' : 'Unpaid'}
+                </span>
+              )}
+            </div>
+            <div className="text-right">
+              <span className="text-lg font-bold text-teal-800">₹{orderValue.toLocaleString('en-IN')}</span>
+              {canEdit && (!order.paymentStatus || order.paymentStatus === 'UNPAID') && (
+                <button onClick={() => setShowPayment(true)} className="block ml-auto mt-0.5 text-xs text-teal-700 hover:text-teal-900 underline">
+                  Collect Payment
+                </button>
+              )}
+            </div>
           </div>
 
           {order.clinicalNotes && (
@@ -488,6 +658,16 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
                   </div>
                   {item.normalRange && <p className="text-xs text-gray-400 mt-1">Normal: {item.normalRange}</p>}
                   {item.notes && <p className="text-xs text-gray-500 mt-1 italic">{item.notes}</p>}
+                  {item.isOutsourced ? (
+                    <p className="text-xs text-blue-600 mt-1">
+                      External: {item.externalLabName}
+                      {item.externalReference && ` · Ref: ${item.externalReference}`}
+                    </p>
+                  ) : (canEdit && !item.result && (
+                    <button onClick={() => setOutsourceItem(item)} className="mt-1 text-xs text-gray-400 hover:text-teal-600 underline">
+                      Send to External Lab
+                    </button>
+                  ))}
                 </div>
               ))}
             </div>
@@ -638,12 +818,251 @@ function AnalyticsTab({ analytics, tests }: { analytics: Analytics | null; tests
   );
 }
 
+// ── Reagents Tab ──────────────────────────────────────────────────────────────
+function ReagentsTab({ canEdit }: { canEdit: boolean }) {
+  const [reagents, setReagents] = useState<LabReagent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editItem, setEditItem] = useState<LabReagent | null>(null);
+  const [usageModal, setUsageModal] = useState<LabReagent | null>(null);
+  const EMPTY_FORM = { name: '', unit: 'mL', currentQty: '0', reorderLevel: '10', unitCost: '0', manufacturer: '', batchNo: '', expiryDate: '' };
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [usageForm, setUsageForm] = useState({ quantity: '1', type: 'USE' as 'USE' | 'RESTOCK' | 'DISCARD', notes: '' });
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await appointmentApi.get('/lab/reagents');
+      setReagents(Array.isArray(res.data) ? res.data : []);
+    } catch { setReagents([]); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  function openEdit(r: LabReagent) {
+    setEditItem(r);
+    setForm({ name: r.name, unit: r.unit, currentQty: r.currentQty, reorderLevel: r.reorderLevel, unitCost: r.unitCost, manufacturer: r.manufacturer ?? '', batchNo: r.batchNo ?? '', expiryDate: r.expiryDate ?? '' });
+    setShowAdd(true);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault(); setSaving(true);
+    try {
+      const payload = { ...form, currentQty: parseFloat(form.currentQty), reorderLevel: parseFloat(form.reorderLevel), unitCost: parseFloat(form.unitCost) };
+      if (editItem) { await appointmentApi.patch(`/lab/reagents/${editItem.id}`, payload); }
+      else { await appointmentApi.post('/lab/reagents', payload); }
+      setShowAdd(false); setEditItem(null); setForm(EMPTY_FORM); load();
+    } catch { } finally { setSaving(false); }
+  }
+
+  async function handleLogUsage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!usageModal) return;
+    setSaving(true);
+    try {
+      await appointmentApi.post(`/lab/reagents/${usageModal.id}/usage`, {
+        quantity: parseFloat(usageForm.quantity), type: usageForm.type,
+        notes: usageForm.notes || undefined,
+      });
+      setUsageModal(null); setUsageForm({ quantity: '1', type: 'USE', notes: '' }); load();
+    } catch { } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Chemical Reagents</h2>
+          <p className="text-xs text-gray-500">Track reagent stock and log usage per session</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => { setEditItem(null); setForm(EMPTY_FORM); setShowAdd(true); }}
+            className="px-3 py-1.5 text-xs bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700 flex items-center gap-1.5">
+            + Add Reagent
+          </button>
+        )}
+      </div>
+
+      {/* Add/Edit Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">{editItem ? 'Edit Reagent' : 'Add Reagent'}</h2>
+              <button onClick={() => { setShowAdd(false); setEditItem(null); }} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <form onSubmit={handleSave} className="p-5 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Reagent Name *</label>
+                <input required value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. HbA1c Reagent Kit"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Unit</label>
+                  <input value={form.unit} onChange={e => setForm(p => ({ ...p, unit: e.target.value }))} placeholder="mL / strips / vials"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Unit Cost (₹)</label>
+                  <input type="number" step="0.01" min="0" value={form.unitCost} onChange={e => setForm(p => ({ ...p, unitCost: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Current Qty</label>
+                  <input type="number" step="0.01" min="0" value={form.currentQty} onChange={e => setForm(p => ({ ...p, currentQty: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Reorder Level</label>
+                  <input type="number" step="0.01" min="0" value={form.reorderLevel} onChange={e => setForm(p => ({ ...p, reorderLevel: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Batch No.</label>
+                  <input value={form.batchNo} onChange={e => setForm(p => ({ ...p, batchNo: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date</label>
+                  <input type="date" value={form.expiryDate} onChange={e => setForm(p => ({ ...p, expiryDate: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Manufacturer</label>
+                <input value={form.manufacturer} onChange={e => setForm(p => ({ ...p, manufacturer: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => { setShowAdd(false); setEditItem(null); }} className="flex-1 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 py-2 text-sm bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700 disabled:opacity-60">
+                  {saving ? 'Saving…' : editItem ? 'Update' : 'Add Reagent'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Usage Log Modal */}
+      {usageModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900 text-sm">Log Usage — {usageModal.name}</h2>
+              <button onClick={() => setUsageModal(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <form onSubmit={handleLogUsage} className="p-5 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Type</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['USE', 'RESTOCK', 'DISCARD'] as const).map(t => (
+                    <button key={t} type="button" onClick={() => setUsageForm(p => ({ ...p, type: t }))}
+                      className={`py-2 text-xs rounded-lg border transition-colors ${usageForm.type === t ? 'bg-teal-600 text-white border-teal-600' : 'text-gray-600 border-gray-300 hover:border-teal-400'}`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Quantity ({usageModal.unit})</label>
+                <input type="number" step="0.01" min="0.01" required value={usageForm.quantity} onChange={e => setUsageForm(p => ({ ...p, quantity: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Notes (optional)</label>
+                <input value={usageForm.notes} onChange={e => setUsageForm(p => ({ ...p, notes: e.target.value }))} placeholder="Test session, lot number, reason…"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setUsageModal(null)} className="flex-1 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 py-2 text-sm bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700 disabled:opacity-60">
+                  {saving ? 'Saving…' : 'Log'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reagent list */}
+      {loading ? (
+        <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading reagents…</div>
+      ) : reagents.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+          <p className="text-3xl mb-2">🧪</p>
+          <p className="text-sm">No reagents configured yet</p>
+          {canEdit && <button onClick={() => setShowAdd(true)} className="mt-3 px-4 py-1.5 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700">Add first reagent</button>}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Reagent</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Stock</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Reorder At</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Expiry</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                {canEdit && <th className="px-4 py-3" />}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {reagents.map(r => {
+                const qty = parseFloat(r.currentQty);
+                const reorder = parseFloat(r.reorderLevel);
+                const isLow = qty <= reorder;
+                const expDate = r.expiryDate ? new Date(r.expiryDate) : null;
+                const isExpiring = expDate && expDate < new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+                return (
+                  <tr key={r.id} className={`hover:bg-gray-50 ${isLow ? 'bg-red-50/30' : ''}`}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-900">{r.name}</p>
+                      {r.manufacturer && <p className="text-xs text-gray-400">{r.manufacturer}{r.batchNo ? ` · Batch: ${r.batchNo}` : ''}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`font-semibold ${isLow ? 'text-red-600' : 'text-gray-900'}`}>{qty.toFixed(1)} {r.unit}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-500 text-xs">{reorder.toFixed(1)}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {expDate ? (
+                        <span className={isExpiring ? 'text-amber-600 font-medium' : 'text-gray-500'}>
+                          {expDate.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}{isExpiring ? ' ⚠' : ''}
+                        </span>
+                      ) : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isLow ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                        {isLow ? 'Low Stock' : 'OK'}
+                      </span>
+                    </td>
+                    {canEdit && (
+                      <td className="px-4 py-3">
+                        <div className="flex gap-2">
+                          <button onClick={() => setUsageModal(r)} className="text-xs text-teal-600 hover:text-teal-800 font-medium">Log</button>
+                          <button onClick={() => openEdit(r)} className="text-xs text-gray-500 hover:text-gray-700">Edit</button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function LabPage() {
   const { user } = useAuthStore();
   const role = user?.role ?? '';
-  const canManageCatalog = ['ADMIN', 'LAB_TECHNICIAN'].includes(role);
-  const canEdit = ['ADMIN', 'LAB_TECHNICIAN', 'NURSE', 'DOCTOR'].includes(role);
+  const canManageCatalog = ['ADMIN', 'NURSE'].includes(role);
+  const canEdit = ['ADMIN', 'NURSE', 'DOCTOR'].includes(role);
 
   const [orders, setOrders] = useState<LabOrder[]>([]);
   const [tests, setTests] = useState<LabTest[]>([]);
@@ -651,7 +1070,7 @@ export default function LabPage() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('ALL');
-  const [mainTab, setMainTab] = useState<'orders' | 'analytics'>('orders');
+  const [mainTab, setMainTab] = useState<'orders' | 'analytics' | 'reagents'>('orders');
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
   const [showCatalog, setShowCatalog] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -818,8 +1237,8 @@ export default function LabPage() {
         {/* Main tabs */}
         <div className="flex items-center justify-between mb-5">
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-            {[{ key: 'orders', label: 'Orders' }, { key: 'analytics', label: 'Analytics' }].map(t => (
-              <button key={t.key} onClick={() => setMainTab(t.key as 'orders' | 'analytics')}
+            {[{ key: 'orders', label: 'Orders' }, { key: 'analytics', label: 'Analytics' }, { key: 'reagents', label: 'Reagents' }].map(t => (
+              <button key={t.key} onClick={() => setMainTab(t.key as 'orders' | 'analytics' | 'reagents')}
                 className={cn('px-4 py-1.5 text-sm font-medium rounded-lg transition-colors',
                   mainTab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
                 {t.label}
@@ -834,6 +1253,8 @@ export default function LabPage() {
 
         {mainTab === 'analytics' ? (
           <AnalyticsTab analytics={analytics} tests={tests} />
+        ) : mainTab === 'reagents' ? (
+          <ReagentsTab canEdit={canEdit} />
         ) : (
           <>
             {/* Status filter tabs */}

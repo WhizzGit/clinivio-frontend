@@ -177,6 +177,8 @@ export default function ConsultationPage() {
   const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
   const [showAiPanel, setShowAiPanel] = useState(false);
 
+  const [rxLayout, setRxLayout] = useState<'compact' | 'column'>('compact');
+
   const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -942,6 +944,18 @@ export default function ConsultationPage() {
                   }
                 </button>
                 <button
+                  type="button"
+                  onClick={() => setRxLayout(l => l === 'compact' ? 'column' : 'compact')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                  title="Toggle prescription layout"
+                >
+                  {rxLayout === 'compact' ? (
+                    <><span>⊞</span> Column View</>
+                  ) : (
+                    <><span>☰</span> Compact View</>
+                  )}
+                </button>
+                <button
                   onClick={() => setMeds([...meds, emptyMed()])}
                   className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium"
                 >
@@ -995,7 +1009,7 @@ export default function ConsultationPage() {
                       <button onClick={() => removeMed(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className={rxLayout === 'compact' ? "grid grid-cols-2 md:grid-cols-4 gap-3" : "grid grid-cols-1 gap-3"}>
                     <div className="md:col-span-2 relative">
                       <label className="text-xs text-gray-500 mb-1 block">
                         Medicine Name <span className="text-red-400">*</span>
