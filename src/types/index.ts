@@ -188,6 +188,97 @@ export interface Invoice {
   updatedAt: string;
 }
 
+// ─── Pharmacy: Vendor / Stock Ledger / Purchase Returns ────────────────────────
+
+export interface Vendor {
+  id: string;
+  tenantId: string;
+  name: string;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  gstin?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StockMovementType = "PURCHASE" | "DISPENSE" | "ADJUSTMENT" | "RETURN_TO_VENDOR";
+export type StockLedgerRefType =
+  | "PHARMACY_PURCHASE"
+  | "PHARMACY_ORDER"
+  | "PHARMACY_PURCHASE_RETURN"
+  | "MANUAL_ADJUSTMENT";
+
+export interface PharmacyStockLedgerEntry {
+  id: string;
+  tenantId: string;
+  inventoryId: string;
+  movementType: StockMovementType;
+  quantityChange: number;
+  balanceAfter: number;
+  batchNo?: string | null;
+  expiryDate?: string | null;
+  refType?: StockLedgerRefType | null;
+  refId?: string | null;
+  notes?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+}
+
+export type PurchaseReturnReason =
+  | "DAMAGED"
+  | "EXPIRED"
+  | "WRONG_ITEM"
+  | "QUALITY_ISSUE"
+  | "OVERSTOCK"
+  | "OTHER";
+
+export interface PharmacyPurchaseReturnItem {
+  id: string;
+  returnId: string;
+  inventoryId?: string | null;
+  originalPurchaseItemId?: string | null;
+  medicineName: string;
+  batchNo?: string | null;
+  expiryDate?: string | null;
+  quantity: number;
+  purchasePrice: number;
+  gstRate?: number | null;
+  reason: PurchaseReturnReason;
+  lineTotal: number;
+}
+
+export interface PharmacyPurchaseReturn {
+  id: string;
+  tenantId: string;
+  vendorId: string;
+  vendor?: Vendor;
+  originalPurchaseId?: string | null;
+  debitNoteNo?: string | null;
+  returnDate: string;
+  totalAmount: number;
+  notes?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items: PharmacyPurchaseReturnItem[];
+}
+
+// Matches the backend's { data, pagination: {...} } shape used by pharmacy
+// list endpoints — distinct from PaginatedResponse<T> below, which has a
+// flatter shape used by other modules.
+export interface PharmacyPagedResult<T> {
+  data: T[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+}
+
 // ─── Generic ──────────────────────────────────────────────────────────────────
 
 export interface PaginatedResponse<T> {

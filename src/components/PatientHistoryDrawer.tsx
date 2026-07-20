@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { appointmentApi, billingApi, patientApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
+import { useToast } from '@/components/ui/toaster';
 import {
   generatePrescriptionHtml,
   generateReceiptHtml,
@@ -159,13 +160,15 @@ interface AiSummary {
 }
 
 export function PatientHistoryDrawer({ patient, onClose }: Props) {
-  const { tenantProfile } = useAuthStore();
+  const { tenantProfile, user } = useAuthStore();
+  const { toast } = useToast();
   const [tab, setTab] = useState<Tab>('visits');
   const [visits, setVisits] = useState<VisitRecord[]>([]);
   const [consultations, setConsultations] = useState<ConsultRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
   const [printingReport, setPrintingReport] = useState(false);
   const [aiSummary, setAiSummary] = useState<AiSummary | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -360,6 +363,23 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
       printDocument(html);
     } finally {
       setPrintingId(null);
+    }
+  }
+
+  async function refundInvoice(inv: InvoiceRecord) {
+    if (!confirm(`Refund invoice ${inv.invoiceNumber} for ₹${parseFloat(inv.totalAmount).toLocaleString('en-IN')}? This cannot be undone.`)) {
+      return;
+    }
+    setRefundingId(inv.id);
+    try {
+      await billingApi.post(`/invoices/${inv.id}/refund`);
+      toast({ title: 'Invoice refunded', description: inv.invoiceNumber, variant: 'success' });
+      await load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      toast({ title: 'Refund failed', description: e?.response?.data?.message ?? 'Please try again', variant: 'destructive' });
+    } finally {
+      setRefundingId(null);
     }
   }
 
@@ -907,6 +927,21 @@ export function PatientHistoryDrawer({ patient, onClose }: Props) {
                                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                                     )}
                                     Receipt
+                                  </button>
+                                )}
+                                {isPaid && user?.role === 'ADMIN' && (
+                                  <button
+                                    onClick={() => refundInvoice(inv)}
+                                    disabled={refundingId === inv.id}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50"
+                                    title="Refund invoice"
+                                  >
+                                    {refundingId === inv.id ? (
+                                      <span className="w-3 h-3 border border-red-300 border-t-red-600 rounded-full animate-spin" />
+                                    ) : (
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l-4-4m0 0l4-4m-4 4h11a4 4 0 010 8h-1" /></svg>
+                                    )}
+                                    Refund
                                   </button>
                                 )}
                               </div>

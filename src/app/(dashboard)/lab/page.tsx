@@ -3,134 +3,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { appointmentApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth.store';
-import { generateLabReportHtml, printDocument } from '@/lib/print';
+import { useToast } from '@/components/ui/toaster';
+import { generateLabReportHtml, generateSampleLabelHtml, printDocument } from '@/lib/print';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-
-interface LabTest {
-  id: string; name: string; code: string; category: string;
-  unit?: string; normalRange?: string; price: number; turnaround: number; isActive: boolean;
-}
-interface LabOrderItem {
-  id: string; labTestId: string; result?: string; unit?: string;
-  normalRange?: string; flag?: 'NORMAL' | 'ABNORMAL' | 'CRITICAL'; notes?: string;
-  isOutsourced?: boolean; externalLabName?: string | null; externalReference?: string | null;
-  labTest: { id: string; name: string; code: string; unit?: string; normalRange?: string; price: number };
-}
-interface LabOrder {
-  id: string; orderNumber: string; status: string; priority: string;
-  clinicalNotes?: string; sampleType?: string; collectedAt?: string;
-  completedAt?: string; createdAt: string;
-  paymentStatus?: string; amountDue?: number; amountPaid?: number;
-  patient: { id: string; firstName: string; lastName: string; uhid: string; phone: string };
-  orderedBy: { firstName: string; lastName: string };
-  assignedTo?: { firstName: string; lastName: string };
-  items: LabOrderItem[];
-}
-interface LabReagent {
-  id: string; name: string; unit: string;
-  currentQty: string; reorderLevel: string; unitCost: string;
-  manufacturer?: string | null; batchNo?: string | null; expiryDate?: string | null;
-  isActive: boolean;
-}
-interface Stats { pending: number; sampleCollected: number; inProgress: number; completedToday: number; total: number }
-interface Analytics {
-  period: number; totalOrders: number; completedOrders: number; todayOrders: number;
-  completedRevenue: number; avgTurnaroundHours: number; criticalItems: number; criticalRate: number;
-  categoryBreakdown: Record<string, { orderCount: number; revenue: number; testCount: number; activeTests: number }>;
-}
-
-const STATUS_STYLES: Record<string, string> = {
-  PENDING: 'bg-yellow-100 text-yellow-700', SAMPLE_COLLECTED: 'bg-blue-100 text-blue-700',
-  IN_PROGRESS: 'bg-orange-100 text-orange-700', COMPLETED: 'bg-green-100 text-green-700',
-  CANCELLED: 'bg-gray-100 text-gray-500',
-};
-const STATUS_LABELS: Record<string, string> = {
-  PENDING: 'Pending', SAMPLE_COLLECTED: 'Sample Collected',
-  IN_PROGRESS: 'In Progress', COMPLETED: 'Completed', CANCELLED: 'Cancelled',
-};
-const FLAG_STYLES: Record<string, string> = {
-  NORMAL: 'text-green-600', ABNORMAL: 'text-orange-600 font-semibold', CRITICAL: 'text-red-600 font-bold',
-};
-const PRIORITY_STYLES: Record<string, string> = {
-  ROUTINE: 'bg-gray-100 text-gray-600', URGENT: 'bg-orange-100 text-orange-700', STAT: 'bg-red-100 text-red-700',
-};
-const CATEGORY_ICONS: Record<string, string> = {
-  'Haematology': '🩸', 'Biochemistry': '🧪', 'Microbiology': '🦠',
-  'Serology': '💉', 'Urine Analysis': '🔬', 'Radiology': '🩻', 'Other': '🧫',
-};
-
-// ── Payment Modal ─────────────────────────────────────────────────────────────
-function PaymentModal({ order, onClose, onSaved }: { order: LabOrder; onClose: () => void; onSaved: () => void }) {
-  const [method, setMethod] = useState<'CASH' | 'CARD' | 'UPI' | 'ONLINE'>('CASH');
-  const [amount, setAmount] = useState(String(order.amountDue ?? order.items.reduce((s, i) => s + Number(i.labTest.price), 0)));
-  const [waived, setWaived] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await appointmentApi.post(`/lab/orders/${order.id}/collect-payment`, {
-        paymentMethod: waived ? undefined : method,
-        amountPaid: waived ? 0 : parseFloat(amount),
-        waived,
-      });
-      onSaved(); onClose();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e?.response?.data?.message || 'Payment collection failed');
-    } finally { setSaving(false); }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-900">Collect Payment</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm">
-            <p className="font-medium text-gray-900">{order.orderNumber}</p>
-            <p className="text-gray-500 text-xs">{order.patient.firstName} {order.patient.lastName} · {order.items.length} test(s)</p>
-          </div>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" checked={waived} onChange={e => setWaived(e.target.checked)} className="rounded" />
-            Waive payment (insurance / free service)
-          </label>
-          {!waived && (
-            <>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Amount (₹) *</label>
-                <input type="number" step="0.01" min="0" required value={amount} onChange={e => setAmount(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Payment Method</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(['CASH', 'CARD', 'UPI', 'ONLINE'] as const).map(m => (
-                    <button key={m} type="button" onClick={() => setMethod(m)}
-                      className={`py-2 text-xs rounded-lg border transition-colors ${method === m ? 'bg-teal-600 text-white border-teal-600' : 'text-gray-600 border-gray-300 hover:border-teal-400'}`}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-          {error && <p className="text-xs text-red-600">{error}</p>}
-          <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="flex-1 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={saving} className="flex-1 py-2 text-sm bg-teal-600 text-white rounded-lg font-semibold hover:bg-teal-700 disabled:opacity-60">
-              {saving ? 'Saving…' : waived ? 'Waive' : `Collect ₹${parseFloat(amount || '0').toFixed(2)}`}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+import { STATUS_STYLES, STATUS_LABELS, FLAG_STYLES, PRIORITY_STYLES, BILLING_MODE_STYLES, CATEGORY_ICONS, fmtDate } from './constants';
+import { useLabDashboard } from './hooks';
+import PaymentModal from './PaymentModal';
+import OrdersTab from './OrdersTab';
+import BillingTab from './BillingTab';
+import IPRequestsTab from './IPRequestsTab';
+import ReportsTab from './ReportsTab';
+import type { LabTest, LabOrderItem, LabOrder, LabReagent, Stats, Analytics } from './types';
 
 // ── Outsource Modal ───────────────────────────────────────────────────────────
 function OutsourceModal({ orderId, item, onClose, onSaved }: {
@@ -232,7 +115,9 @@ function ResultsModal({ order, onClose, onSaved }: { order: LabOrder; onClose: (
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
           <div>
             <h2 className="text-base font-semibold text-gray-900">Enter Results — {order.orderNumber}</h2>
-            <p className="text-xs text-gray-500">{order.patient.firstName} {order.patient.lastName} · {order.patient.uhid}</p>
+            <p className="text-xs text-gray-500">
+              {order.patient ? `${order.patient.firstName} ${order.patient.lastName} · ${order.patient.uhid}` : (order.walkInName ?? 'Walk-in')}
+            </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
         </div>
@@ -488,12 +373,21 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
   const [outsourceItem, setOutsourceItem] = useState<LabOrderItem | null>(null);
   const [actioning, setActioning] = useState(false);
   const { tenantProfile } = useAuthStore();
+  const { toast } = useToast();
+
+  const patientName = order.patient
+    ? `${order.patient.firstName} ${order.patient.lastName}`
+    : (order.walkInName ?? 'Walk-in');
+  const patientPhone = order.patient ? order.patient.phone : (order.walkInPhone ?? '');
 
   async function action(endpoint: string, body?: object) {
     setActioning(true);
     try {
       await appointmentApi.patch(`/lab/orders/${order.id}/${endpoint}`, body ?? {});
       onRefresh(); onClose();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      toast({ title: 'Action failed', description: e?.response?.data?.message ?? 'Please try again', variant: 'destructive' });
     } finally { setActioning(false); }
   }
 
@@ -505,10 +399,10 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
       orderNumber: order.orderNumber,
       reportDate: order.completedAt ?? order.createdAt,
       patient: {
-        firstName: order.patient.firstName,
-        lastName: order.patient.lastName,
-        uhid: order.patient.uhid,
-        phone: order.patient.phone,
+        firstName: order.patient?.firstName ?? order.walkInName ?? 'Walk-in',
+        lastName: order.patient?.lastName ?? '',
+        uhid: order.patient?.uhid ?? '—',
+        phone: patientPhone,
       },
       doctor: {
         firstName: order.orderedBy.firstName,
@@ -532,13 +426,30 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
     printDocument(html);
   }
 
+  function handlePrintLabel() {
+    if (!order.sampleLabelCode) return;
+    const tenant = tenantProfile ?? { name: 'Hospital' };
+    const html = generateSampleLabelHtml({
+      tenant,
+      orderNumber: order.orderNumber,
+      sampleLabelCode: order.sampleLabelCode,
+      patientName,
+      patientUhid: order.patient?.uhid,
+      collectedAt: order.collectedAt,
+      priority: order.priority,
+      testNames: order.items.map(i => i.labTest.name),
+    });
+    printDocument(html);
+  }
+
   function handleWhatsApp() {
-    const phone = order.patient.phone.replace(/\D/g, '');
+    if (!patientPhone) { toast({ title: 'No phone number on file', variant: 'destructive' }); return; }
+    const phone = patientPhone.replace(/\D/g, '');
     const completedItems = order.items.filter(i => i.result);
     const hasCritical = completedItems.some(i => i.flag === 'CRITICAL');
     const summary = completedItems.map(i => `• ${i.labTest.name}: ${i.result} ${i.unit ?? ''} ${i.flag ? `(${i.flag})` : ''}`).join('\n');
     const msg = encodeURIComponent(
-      `Dear ${order.patient.firstName}, your lab report (Order ${order.orderNumber}) from ${tenantProfile?.name ?? 'our lab'} is ready.\n\nResults:\n${summary}${hasCritical ? '\n\n⚠ Critical values detected — please contact your doctor immediately.' : '\n\nFor any queries, please contact us.'}`
+      `Dear ${patientName}, your lab report (Order ${order.orderNumber}) from ${tenantProfile?.name ?? 'our lab'} is ready.\n\nResults:\n${summary}${hasCritical ? '\n\n⚠ Critical values detected — please contact your doctor immediately.' : '\n\nFor any queries, please contact us.'}`
     );
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
   }
@@ -546,9 +457,9 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
   function handleEmail() {
     const completedItems = order.items.filter(i => i.result);
     const summary = completedItems.map(i => `${i.labTest.name}: ${i.result} ${i.unit ?? ''} (${i.flag ?? 'NORMAL'})`).join('\n');
-    const subject = encodeURIComponent(`Lab Report - ${order.orderNumber} - ${order.patient.firstName} ${order.patient.lastName}`);
+    const subject = encodeURIComponent(`Lab Report - ${order.orderNumber} - ${patientName}`);
     const body = encodeURIComponent(
-      `Dear ${order.patient.firstName},\n\nYour lab report (Order: ${order.orderNumber}) is ready.\n\n${summary}\n\nFor any queries, please contact ${tenantProfile?.name ?? 'us'}.\n\nRegards,\n${tenantProfile?.name ?? 'Hospital'}`
+      `Dear ${patientName},\n\nYour lab report (Order: ${order.orderNumber}) is ready.\n\n${summary}\n\nFor any queries, please contact ${tenantProfile?.name ?? 'us'}.\n\nRegards,\n${tenantProfile?.name ?? 'Hospital'}`
     );
     window.open(`mailto:?subject=${subject}&body=${body}`);
   }
@@ -581,12 +492,17 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           <div className="bg-gray-50 rounded-xl p-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Patient</p>
-            <p className="font-semibold text-gray-900">{order.patient.firstName} {order.patient.lastName}</p>
-            <p className="text-sm text-gray-500">{order.patient.uhid} · {order.patient.phone}</p>
-            <div className="flex gap-2 mt-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+              {order.patient ? 'Patient' : 'Walk-in / Outsider'}
+            </p>
+            <p className="font-semibold text-gray-900">{patientName}{order.walkInAge ? `, ${order.walkInAge}y` : ''}</p>
+            <p className="text-sm text-gray-500">{order.patient ? order.patient.uhid : 'No patient record'}{patientPhone ? ` · ${patientPhone}` : ''}</p>
+            <div className="flex gap-2 mt-2 flex-wrap">
               <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', STATUS_STYLES[order.status])}>{STATUS_LABELS[order.status]}</span>
               <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', PRIORITY_STYLES[order.priority])}>{order.priority}</span>
+              <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', BILLING_MODE_STYLES[order.billingMode])}>
+                {order.billingMode === 'CREDIT' ? `IP · Credit${order.admission ? ` (${order.admission.admissionNumber})` : ''}` : 'Cash'}
+              </span>
             </div>
           </div>
 
@@ -617,13 +533,36 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
             </div>
             <div className="text-right">
               <span className="text-lg font-bold text-teal-800">₹{orderValue.toLocaleString('en-IN')}</span>
-              {canEdit && (!order.paymentStatus || order.paymentStatus === 'UNPAID') && (
-                <button onClick={() => setShowPayment(true)} className="block ml-auto mt-0.5 text-xs text-teal-700 hover:text-teal-900 underline">
-                  Collect Payment
-                </button>
+              {order.billingMode === 'CREDIT' ? (
+                <p className="text-xs text-purple-600 mt-0.5">Billed to admission at discharge</p>
+              ) : (
+                canEdit && (!order.paymentStatus || order.paymentStatus === 'UNPAID') && (
+                  <button onClick={() => setShowPayment(true)} className="block ml-auto mt-0.5 text-xs text-teal-700 hover:text-teal-900 underline">
+                    Collect Payment
+                  </button>
+                )
               )}
             </div>
           </div>
+
+          {order.sampleLabelCode && (
+            <div className="bg-gray-50 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-400">Sample Label</p>
+                <p className="font-mono text-sm font-semibold text-gray-900">{order.sampleLabelCode}</p>
+              </div>
+              <button onClick={handlePrintLabel} className="text-xs text-teal-700 hover:text-teal-900 underline">
+                Print Label
+              </button>
+            </div>
+          )}
+
+          {(order.collectionSite || order.collectionMethod) && (
+            <div className="text-xs text-gray-500 flex gap-3">
+              {order.collectionSite && <span>Site: {order.collectionSite}</span>}
+              {order.collectionMethod && <span>Method: {order.collectionMethod}</span>}
+            </div>
+          )}
 
           {order.clinicalNotes && (
             <div>
@@ -730,6 +669,8 @@ function OrderDetailPanel({ order, onClose, onRefresh, canEdit }: {
 
 // ── Analytics Tab ──────────────────────────────────────────────────────────────
 function AnalyticsTab({ analytics, tests }: { analytics: Analytics | null; tests: LabTest[] }) {
+  const { data: dashboard } = useLabDashboard(30);
+
   if (!analytics) return <div className="flex items-center justify-center h-48 text-gray-400 text-sm">Loading analytics…</div>;
 
   const CATEGORIES = ['Haematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Radiology', 'Other'];
@@ -754,6 +695,26 @@ function AnalyticsTab({ analytics, tests }: { analytics: Analytics | null; tests
           </div>
         ))}
       </div>
+
+      {/* Daily trend */}
+      {dashboard && dashboard.daily.length > 1 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-sm font-semibold text-gray-900">Daily Orders & Revenue</h3>
+            <p className="text-xs text-gray-500">{dashboard.completionRate}% completion rate · {dashboard.lowReagentCount} reagents low</p>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={dashboard.daily} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 9 }} />
+              <YAxis tick={{ fontSize: 9 }} />
+              <Tooltip />
+              <Line type="monotone" dataKey="orders" stroke="#0d9488" strokeWidth={2} dot={false} name="Orders" />
+              <Line type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2} dot={false} name="Revenue (₹)" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {/* Category breakdown */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -1070,17 +1031,12 @@ export default function LabPage() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('ALL');
-  const [mainTab, setMainTab] = useState<'orders' | 'analytics' | 'reagents'>('orders');
+  const [mainTab, setMainTab] = useState<'orders' | 'billing' | 'ip' | 'catalog' | 'reports' | 'analytics'>('orders');
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
   const [showCatalog, setShowCatalog] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
 
   const CATEGORIES = ['Haematology', 'Biochemistry', 'Microbiology', 'Serology', 'Urine Analysis', 'Radiology', 'Other'];
-  const STATUS_TABS = [
-    { key: 'ALL', label: 'All' }, { key: 'PENDING', label: 'Pending' },
-    { key: 'SAMPLE_COLLECTED', label: 'Sample Collected' }, { key: 'IN_PROGRESS', label: 'In Progress' },
-    { key: 'COMPLETED', label: 'Completed' },
-  ];
 
   const fetchData = useCallback(async () => {
     try {
@@ -1116,11 +1072,6 @@ export default function LabPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  function fmtDate(iso?: string) {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
-  }
 
   const groupedTests = CATEGORIES.reduce<Record<string, LabTest[]>>((acc, cat) => {
     acc[cat] = tests.filter(t => t.category === cat);
@@ -1237,8 +1188,15 @@ export default function LabPage() {
         {/* Main tabs */}
         <div className="flex items-center justify-between mb-5">
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-            {[{ key: 'orders', label: 'Orders' }, { key: 'analytics', label: 'Analytics' }, { key: 'reagents', label: 'Reagents' }].map(t => (
-              <button key={t.key} onClick={() => setMainTab(t.key as 'orders' | 'analytics' | 'reagents')}
+            {[
+              { key: 'orders', label: 'Orders' },
+              { key: 'billing', label: 'Billing' },
+              { key: 'ip', label: 'IP Requests' },
+              { key: 'catalog', label: 'Catalog & Reagents' },
+              { key: 'reports', label: 'Reports' },
+              { key: 'analytics', label: 'Analytics' },
+            ].map(t => (
+              <button key={t.key} onClick={() => setMainTab(t.key as typeof mainTab)}
                 className={cn('px-4 py-1.5 text-sm font-medium rounded-lg transition-colors',
                   mainTab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
                 {t.label}
@@ -1253,89 +1211,23 @@ export default function LabPage() {
 
         {mainTab === 'analytics' ? (
           <AnalyticsTab analytics={analytics} tests={tests} />
-        ) : mainTab === 'reagents' ? (
+        ) : mainTab === 'catalog' ? (
           <ReagentsTab canEdit={canEdit} />
+        ) : mainTab === 'billing' ? (
+          <BillingTab onSelectOrder={setSelectedOrder} />
+        ) : mainTab === 'ip' ? (
+          <IPRequestsTab onSelectOrder={setSelectedOrder} />
+        ) : mainTab === 'reports' ? (
+          <ReportsTab onSelectOrder={setSelectedOrder} />
         ) : (
-          <>
-            {/* Status filter tabs */}
-            <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mb-5 w-fit">
-              {STATUS_TABS.map(tab => (
-                <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                  className={cn('px-3 py-1.5 text-sm font-medium rounded-lg transition-colors',
-                    activeTab === tab.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Orders table */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              {loading ? (
-                <div className="flex items-center justify-center h-48 text-gray-400">Loading…</div>
-              ) : filteredOrders.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-48 gap-2 text-gray-400">
-                  <span className="text-4xl">🔬</span>
-                  <p className="text-sm">No lab orders{categoryFilter ? ` in ${categoryFilter}` : ''}</p>
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Order #</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Patient</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Tests</th>
-                      <th className="px-4 py-3 text-right font-medium text-gray-500">Value</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Doctor</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Time</th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
-                      <th className="px-4 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredOrders.map(order => {
-                      const hasCritical = order.items.some(i => i.flag === 'CRITICAL');
-                      const pendingCount = order.items.filter(i => !i.result).length;
-                      const orderValue = order.items.reduce((s, i) => s + Number(i.labTest.price), 0);
-                      return (
-                        <tr key={order.id}
-                          className={cn('hover:bg-gray-50 cursor-pointer transition-colors', hasCritical && 'bg-red-50 hover:bg-red-100')}
-                          onClick={() => setSelectedOrder(order)}>
-                          <td className="px-4 py-3">
-                            <p className="font-mono text-xs font-semibold text-gray-800">{order.orderNumber}</p>
-                            <span className={cn('text-xs font-medium px-1.5 py-0.5 rounded', PRIORITY_STYLES[order.priority])}>{order.priority}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="font-medium text-gray-900">{order.patient.firstName} {order.patient.lastName}</p>
-                            <p className="text-xs text-gray-400">{order.patient.uhid}</p>
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="text-gray-700">{order.items.length} test{order.items.length !== 1 ? 's' : ''}</p>
-                            {pendingCount > 0 && order.status !== 'PENDING' && (
-                              <p className="text-xs text-orange-500">{pendingCount} results pending</p>
-                            )}
-                            {hasCritical && <p className="text-xs text-red-600 font-semibold">⚠ Critical</p>}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <p className="font-semibold text-gray-900">₹{orderValue.toLocaleString('en-IN')}</p>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-xs">Dr. {order.orderedBy.firstName} {order.orderedBy.lastName}</td>
-                          <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(order.createdAt)}</td>
-                          <td className="px-4 py-3">
-                            <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', STATUS_STYLES[order.status])}>
-                              {STATUS_LABELS[order.status]}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-blue-600 text-xs hover:underline">View →</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
+          <OrdersTab
+            orders={filteredOrders}
+            loading={loading}
+            activeTab={activeTab}
+            onActiveTabChange={setActiveTab}
+            categoryFilter={categoryFilter}
+            onSelectOrder={setSelectedOrder}
+          />
         )}
       </div>
     </div>

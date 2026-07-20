@@ -309,6 +309,16 @@ export default function ConsultationPage() {
     }
   }
 
+  // AI clinical summaries are cached 24h server-side; bust the cache whenever
+  // consultation data actually changes so a doctor never sees a stale summary
+  // after adding notes/prescriptions/follow-ups. Best-effort — a failure here
+  // shouldn't block the save the user actually cares about.
+  function invalidateAiSummary() {
+    const patientId = appt?.patient?.id;
+    if (!patientId) return;
+    appointmentApi.post(`/patients/${patientId}/ai-summary/invalidate`).catch(() => {});
+  }
+
   async function saveVitals() {
     setSaving(true);
     try {
@@ -320,6 +330,7 @@ export default function ConsultationPage() {
         icdCodes,
       });
       hydrate(res.data);
+      invalidateAiSummary();
       showToast('Vitals & notes saved');
     } catch (err: any) {
       showToast(err?.response?.data?.message || 'Save failed', 'error');
@@ -347,6 +358,7 @@ export default function ConsultationPage() {
           inventoryId: m.inventoryId || undefined,
         })),
       });
+      invalidateAiSummary();
       showToast('Prescription saved');
     } catch (err: any) {
       showToast(err?.response?.data?.message || 'Save failed', 'error');
@@ -434,6 +446,7 @@ export default function ConsultationPage() {
       setFollowUps(prev => [...prev, res.data]);
       setFollowUpDate('');
       setFollowUpNotes('');
+      invalidateAiSummary();
       showToast('Follow-up scheduled');
     } catch (err: any) {
       showToast(err?.response?.data?.message || 'Failed to schedule', 'error');

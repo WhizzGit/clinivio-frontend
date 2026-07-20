@@ -22,6 +22,7 @@ interface Appointment {
 interface PatientOption { id: string; firstName: string; lastName: string; uhid: string; phone: string }
 interface DoctorOption { id: string; firstName: string; lastName: string; role?: string }
 interface DepartmentOption { id: string; name: string }
+interface AvailableSlot { id: string; slotDate: string; startTime: string; endTime: string; maxPatients: number; bookedCount: number }
 
 const STATUS_COLORS: Record<string, string> = {
   REGISTERED: 'bg-yellow-100 text-yellow-700',
@@ -70,6 +71,9 @@ function BookingModal({
   const [opinionObtainedBy, setOpinionObtainedBy] = useState('');
   const [scheduledDate, setScheduledDate] = useState(todayDate());
   const [scheduledTime, setScheduledTime] = useState(currentTime());
+  const [slots, setSlots] = useState<AvailableSlot[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [selectedSlotId, setSelectedSlotId] = useState('');
   const [payAtCounter, setPayAtCounter] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +99,19 @@ function BookingModal({
     loadLookups();
   }, []);
 
+  // Doctor + date together determine which pre-configured slots (if any) are
+  // available. Not every doctor has slots configured — when none exist, the
+  // freeform time input below is kept as a fallback so booking still works.
+  useEffect(() => {
+    setSelectedSlotId('');
+    if (!doctorId || !scheduledDate) { setSlots([]); return; }
+    setSlotsLoading(true);
+    appointmentApi.get(`/slots/available?doctorId=${doctorId}&date=${scheduledDate}`)
+      .then(res => setSlots(Array.isArray(res.data) ? res.data : (res.data?.data ?? [])))
+      .catch(() => setSlots([]))
+      .finally(() => setSlotsLoading(false));
+  }, [doctorId, scheduledDate]);
+
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     if (!patientQuery.trim()) { setPatientResults([]); return; }
@@ -112,27 +129,40 @@ function BookingModal({
     e.preventDefault();
     if (!selectedPatient) { setError('Select a patient'); return; }
     if (!doctorId) { setError('Select a doctor'); return; }
+    if (slots.length > 0 && !selectedSlotId) { setError('Select a time slot'); return; }
     setSaving(true);
     setError(null);
     try {
+      // When a slot is picked, the backend derives scheduledAt/token from the
+      // slot itself and atomically checks+increments its booked count — don't
+      // send a freeform scheduledAt alongside it. Fall back to freeform
+      // date+time only when this doctor has no slots configured for the date.
       const scheduledAt = `${scheduledDate}T${scheduledTime}:00`;
       const res = await appointmentApi.post('/appointments', {
         patientId: selectedPatient.id,
         doctorId,
         ...(departmentId && { departmentId }),
+        ...(selectedSlotId ? { slotId: selectedSlotId } : { scheduledAt }),
         visitType,
         appointmentType,
         ...(chiefComplaint.trim() && { chiefComplaint: chiefComplaint.trim() }),
         ...(referredBy.trim() && { referredBy: referredBy.trim() }),
         ...(opinionObtainedBy.trim() && { opinionObtainedBy: opinionObtainedBy.trim() }),
         payAtCounter,
-        scheduledAt,
       });
       onSuccess(res.data?.id || '', visitType);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string | string[] } } };
       const msg = e?.response?.data?.message;
       setError(Array.isArray(msg) ? msg.join(', ') : msg || 'Failed to book appointment');
+      // The selected slot may have just been taken by another booking (race
+      // condition) — refresh the list so the stale/full slot disappears.
+      if (selectedSlotId && doctorId && scheduledDate) {
+        appointmentApi.get(`/slots/available?doctorId=${doctorId}&date=${scheduledDate}`)
+          .then(r => setSlots(Array.isArray(r.data) ? r.data : (r.data?.data ?? [])))
+          .catch(() => {});
+        setSelectedSlotId('');
+      }
     } finally {
       setSaving(false);
     }
@@ -191,7 +221,7 @@ function BookingModal({
             )}
           </div>
 
-          {/* Date & Time */}
+          {/* Date & Doctor */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Date <span className="text-red-500">*</span></label>
@@ -204,29 +234,62 @@ function BookingModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Time <span className="text-red-500">*</span></label>
-              <input
-                type="time"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Doctor <span className="text-red-500">*</span></label>
+              <select
+                value={doctorId}
+                onChange={(e) => setDoctorId(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              />
+              >
+                <option value="">— Select doctor —</option>
+                {doctors.map((d) => (
+                  <option key={d.id} value={d.id}>Dr. {d.firstName} {d.lastName}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Doctor */}
+          {/* Time — pre-configured slots for this doctor/date if any exist, else a freeform time */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Doctor <span className="text-red-500">*</span></label>
-            <select
-              value={doctorId}
-              onChange={(e) => setDoctorId(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="">— Select doctor —</option>
-              {doctors.map((d) => (
-                <option key={d.id} value={d.id}>Dr. {d.firstName} {d.lastName}</option>
-              ))}
-            </select>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Time <span className="text-red-500">*</span></label>
+            {!doctorId ? (
+              <p className="text-xs text-gray-400 px-1 py-2">Select a doctor to see available times</p>
+            ) : slotsLoading ? (
+              <p className="text-xs text-gray-400 px-1 py-2">Checking availability…</p>
+            ) : slots.length > 0 ? (
+              <div className="grid grid-cols-3 gap-2">
+                {slots.map((s) => {
+                  const remaining = s.maxPatients - s.bookedCount;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setSelectedSlotId(s.id)}
+                      className={cn(
+                        'py-2 text-xs font-medium rounded-lg border transition-colors',
+                        selectedSlotId === s.id
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+                      )}
+                    >
+                      {s.startTime.slice(0, 5)}
+                      <span className={cn('block text-[10px]', selectedSlotId === s.id ? 'text-blue-100' : 'text-gray-400')}>
+                        {remaining} left
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <>
+                <input
+                  type="time"
+                  value={scheduledTime}
+                  onChange={(e) => setScheduledTime(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                />
+                <p className="text-xs text-gray-400 mt-1">No pre-configured slots for this doctor/date — booking a freeform time.</p>
+              </>
+            )}
           </div>
 
           {/* Department */}

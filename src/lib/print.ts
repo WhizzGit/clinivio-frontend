@@ -565,6 +565,50 @@ export function generateLabReportHtml(d: LabReportPrintData): string {
 </body></html>`;
 }
 
+// ── Sample Label ───────────────────────────────────────────────────────────────
+// Compact label (not a full report page) for a specimen container — printed at
+// sample-collection time. No real barcode/scanner integration yet (see the Lab
+// module's bulk-import-results endpoint for the current placeholder), so the
+// label code is rendered as large monospace text for manual reading/entry.
+
+export interface SampleLabelPrintData {
+  tenant: TenantProfile;
+  orderNumber: string;
+  sampleLabelCode: string;
+  patientName: string;
+  patientUhid?: string;
+  collectedAt?: string;
+  priority: string;
+  testNames: string[];
+}
+
+export function generateSampleLabelHtml(d: SampleLabelPrintData): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Sample Label — ${d.sampleLabelCode}</title>
+<style>
+  @page { size: 4in 2in; margin: 4mm; }
+  body { font-family: 'Courier New', monospace; margin: 0; }
+  .label { width: 100%; }
+  .code { font-size: 20pt; font-weight: bold; letter-spacing: 1px; text-align: center; border: 1.5pt solid #000; padding: 4px 0; margin-bottom: 4px; }
+  .row { font-size: 9pt; display: flex; justify-content: space-between; margin: 1px 0; }
+  .tests { font-size: 8pt; color: #333; margin-top: 3px; }
+  .hospital { font-size: 8pt; text-align: center; color: #555; margin-bottom: 3px; }
+</style>
+</head>
+<body>
+<div class="label">
+  <div class="hospital">${d.tenant.name}</div>
+  <div class="code">${d.sampleLabelCode}</div>
+  <div class="row"><span>${d.patientName}</span><span>${d.patientUhid ?? 'Walk-in'}</span></div>
+  <div class="row"><span>Order: ${d.orderNumber}</span><span>${d.priority}</span></div>
+  <div class="row"><span>Collected: ${fmtDateTime(d.collectedAt)}</span></div>
+  <div class="tests">${d.testNames.join(' · ')}</div>
+</div>
+<script>window.onload=function(){window.print()}</script>
+</body></html>`;
+}
+
 // ── Open in new window and print ─────────────────────────────────────────────
 
 export function printDocument(html: string) {
