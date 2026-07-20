@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -21,6 +21,14 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function ForgotPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ForgotPasswordForm />
+    </Suspense>
+  );
+}
+
+function ForgotPasswordForm() {
   const searchParams = useSearchParams();
   const [sent, setSent] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
