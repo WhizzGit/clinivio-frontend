@@ -64,7 +64,7 @@ export default function ForgotPasswordPage() {
               <span className="font-bold text-sm tracking-wide">Clinivio</span>
             </div>
             <p className="text-white font-semibold text-base">Reset Password</p>
-            <p className="text-blue-200 text-xs mt-0.5">We'll email you a secure reset link</p>
+            <p className="text-blue-200 text-xs mt-0.5">We&apos;ll email you a secure reset link</p>
           </div>
 
           <div className="p-6">
@@ -78,7 +78,7 @@ export default function ForgotPasswordPage() {
                 <div>
                   <p className="text-gray-900 font-semibold text-base">Check your inbox</p>
                   <p className="text-gray-500 text-sm mt-1 leading-relaxed">
-                    If that email is registered, you'll receive a reset link shortly.
+                    If that email is registered, you&apos;ll receive a reset link shortly.
                     The link expires in 1 hour.
                   </p>
                 </div>
