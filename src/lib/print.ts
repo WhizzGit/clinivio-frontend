@@ -20,6 +20,7 @@ export interface TenantProfile {
   tagline?: string | null;
   drugLicenseNo?: string | null;
   pharmacyName?: string | null;
+  allowConsultationBeforePayment?: boolean;
 }
 
 export interface PrintVitals {

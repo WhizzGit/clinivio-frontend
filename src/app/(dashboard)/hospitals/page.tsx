@@ -20,6 +20,7 @@ interface Tenant {
   wabaId?: string;
   subscriptionTier: string;
   isActive: boolean;
+  allowConsultationBeforePayment?: boolean;
   createdAt: string;
   userCount: number;
   adminEmail?: string;
@@ -517,6 +518,7 @@ function EditTenantModal({ tenant, onClose, onSuccess }: {
     wabaId:                 tenant.wabaId ?? '',
     subscriptionTier:       tenant.subscriptionTier,
     isActive:               tenant.isActive,
+    allowConsultationBeforePayment: tenant.allowConsultationBeforePayment ?? false,
     // Admin credentials (leave blank = no change)
     adminEmail:             tenant.adminEmail ?? '',
     adminFirstName:         '',
@@ -564,6 +566,7 @@ function EditTenantModal({ tenant, onClose, onSuccess }: {
       wabaId: form.wabaId || undefined,
       subscriptionTier: form.subscriptionTier,
       isActive: form.isActive,
+      allowConsultationBeforePayment: form.allowConsultationBeforePayment,
       adminEmail: form.adminEmail || undefined,
       adminFirstName: form.adminFirstName || undefined,
       adminLastName: form.adminLastName || undefined,
@@ -665,6 +668,15 @@ function EditTenantModal({ tenant, onClose, onSuccess }: {
                   className="w-4 h-4 text-blue-600 rounded" />
                 <span className="text-sm font-medium text-gray-700">Tenant is Active</span>
               </label>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={form.allowConsultationBeforePayment}
+                  onChange={e => setForm({ ...form, allowConsultationBeforePayment: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 rounded" />
+                <span className="text-sm font-medium text-gray-700">Allow consultation before payment</span>
+              </label>
+              <p className="text-xs text-gray-400 pl-7 -mt-2">
+                Doctors can check in and start a consultation before the fee is paid; the patient pays at the end. Dashboards still flag the visit as payment pending until it&apos;s collected.
+              </p>
             </div>
           </div>
 

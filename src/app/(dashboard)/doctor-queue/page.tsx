@@ -8,6 +8,7 @@ interface QueueEntry {
   id: string;
   tokenNumber: number;
   status: string;
+  paymentStatus?: string;
   chiefComplaint?: string;
   scheduledAt?: string;
   registeredAt?: string;
@@ -46,8 +47,9 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function DoctorQueuePage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, tenantProfile } = useAuthStore();
   const isNurse = user?.role === 'NURSE';
+  const allowConsultBeforePayment = !!tenantProfile?.allowConsultationBeforePayment;
   const [queue, setQueue] = useState<QueueStatus | null>(null);
   const [appointments, setAppointments] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,13 +87,14 @@ export default function DoctorQueuePage() {
 
   /** Check in (if needed) then start consultation and navigate */
   async function startConsultation(appt: QueueEntry) {
-    if (['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status)) {
+    const isUnpaidPreCheckIn = ['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status);
+    if (isUnpaidPreCheckIn && !allowConsultBeforePayment) {
       showToast('Payment must be confirmed before starting consultation', 'error');
       return;
     }
     setActionLoading(appt.id + '-start');
     try {
-      if (appt.status === 'CONFIRMED') {
+      if (appt.status === 'CONFIRMED' || isUnpaidPreCheckIn) {
         await appointmentApi.post(`/appointments/${appt.id}/check-in`);
         await appointmentApi.post(`/appointments/${appt.id}/start`);
       } else if (appt.status === 'CHECKED_IN') {
@@ -430,15 +433,21 @@ export default function DoctorQueuePage() {
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[appt.status] || 'bg-gray-100 text-gray-500'}`}>
                           {STATUS_LABELS[appt.status] || appt.status}
                         </span>
+                        {/* Payment can still be pending after check-in when the tenant allows pay-at-the-end */}
+                        {appt.paymentStatus === 'PENDING' && !['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status) && (
+                          <span className="ml-1 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                            Payment Pending
+                          </span>
+                        )}
                       </td>
 
                       {/* ── Doctor action buttons ─────────────────── */}
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1.5">
-                          {['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status) && (
+                          {['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status) && !allowConsultBeforePayment && (
                             <span className="text-xs text-gray-400 italic">Awaiting payment</span>
                           )}
-                          {appt.status === 'CONFIRMED' && (
+                          {(appt.status === 'CONFIRMED' || (['REGISTERED', 'PENDING_PAYMENT'].includes(appt.status) && allowConsultBeforePayment)) && (
                             <button onClick={() => startConsultation(appt)} disabled={busy('-start')}
                               className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
                               {busy('-start') ? '…' : 'Check In + Start →'}

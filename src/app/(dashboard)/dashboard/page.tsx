@@ -8,6 +8,7 @@ import { DismissModal, type DismissTarget } from '@/components/DismissModal';
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ActivePatient {
   id: string; tokenNumber: number; status: string; visitType: string;
+  paymentStatus?: string;
   chiefComplaint?: string; registeredAt: string;
   patient: { firstName: string; lastName: string; uhid: string; phone: string; dob?: string; gender?: string };
   doctor: { firstName: string; lastName: string };
@@ -255,7 +256,8 @@ export default function ActivePatientBoard() {
       const filtered = filterStatus ? data.filter(p => p.status === filterStatus) : data;
       setPatients(filtered);
       setCounts({
-        registered: data.filter(p => ['REGISTERED', 'PENDING_PAYMENT'].includes(p.status)).length,
+        // Includes patients checked in / in consultation before paying (pay-at-the-end tenants)
+        registered: data.filter(p => p.paymentStatus === 'PENDING').length,
         confirmed: data.filter(p => p.status === 'CONFIRMED').length,
         inProgress: data.filter(p => ['CHECKED_IN', 'IN_PROGRESS'].includes(p.status)).length,
       });
@@ -388,6 +390,11 @@ function PatientCard({ patient: p, onDismiss }: { patient: ActivePatient; onDism
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${p.visitType === 'IPD' ? 'bg-purple-100 text-purple-700' : 'bg-sky-100 text-sky-700'}`}>
             {p.visitType}
           </span>
+          {p.paymentStatus === 'PENDING' && !['REGISTERED', 'PENDING_PAYMENT'].includes(p.status) && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700" title="Consultation fee not yet paid">
+              Payment Pending
+            </span>
+          )}
           <button
             onClick={e => { e.stopPropagation(); onDismiss(p); }}
             title="Dismiss appointment"
