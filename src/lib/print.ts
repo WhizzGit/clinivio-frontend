@@ -75,6 +75,13 @@ export interface ReceiptPrintData {
   tokenNumber: number;
   consultationFee?: number;
   cashierName?: string;
+  // Populated once billing supports discounts/partial payment/EMI (see the
+  // billing & operations enhancements plan) — generateReceiptHtml() doesn't
+  // render these yet, this is just the typing groundwork.
+  discountAmount?: number;
+  discountLabel?: string;
+  amountPaid?: number;
+  balanceDue?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
