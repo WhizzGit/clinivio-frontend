@@ -24,8 +24,23 @@ interface PendingAdmissionInvoice {
   ipdAdmissionId: string;
   patient: { id: string; firstName: string; lastName: string; uhid: string };
   totalAmount: string;
+  balanceDue?: string;
   notes?: string;
   createdAt: string;
+}
+
+interface BillableServiceOption {
+  id: string;
+  name: string;
+  code: string;
+  price: string;
+  isTaxable: boolean;
+}
+
+interface SelectedService {
+  serviceId: string;
+  name: string;
+  amount: number;
 }
 
 const PAYMENT_METHODS = ['CASH', 'UPI', 'CARD', 'INSURANCE', 'NEFT'];
@@ -39,9 +54,19 @@ export default function BillingCounterPage() {
   const [amount, setAmount]         = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [processing, setProcessing] = useState(false);
+  const [billableServices, setBillableServices] = useState<BillableServiceOption[]>([]);
+  const [addedServices, setAddedServices] = useState<SelectedService[]>([]);
+  const [serviceToAdd, setServiceToAdd] = useState('');
+  const [discountType, setDiscountType] = useState<'' | 'PERCENTAGE' | 'FLAT'>('');
+  const [discountValue, setDiscountValue] = useState('');
+  const [paymentMode, setPaymentMode] = useState<'FULL' | 'PARTIAL'>('FULL');
+  const [partialAmount, setPartialAmount] = useState('');
   const [search, setSearch]         = useState('');
   const [historyPatient, setHistoryPatient] = useState<ActivePatient['patient'] | null>(null);
-  const [lastReceipt, setLastReceipt] = useState<{ patient: ActivePatient; amount: number; method: string } | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<{
+    patient: ActivePatient; amount: number; method: string;
+    discountAmount?: number; discountLabel?: string; billTotal?: number; balanceDue?: number;
+  } | null>(null);
   const [pendingAdmissions, setPendingAdmissions] = useState<PendingAdmissionInvoice[]>([]);
   const [selectedAdmission, setSelectedAdmission] = useState<PendingAdmissionInvoice | null>(null);
   const [admissionAmount, setAdmissionAmount] = useState('');
@@ -77,9 +102,40 @@ export default function BillingCounterPage() {
   useEffect(() => {
     fetchPending();
     fetchPendingAdmissions();
+    billingApi.get('/billable-services').then(r => setBillableServices(r.data || [])).catch(() => {});
     const t = setInterval(() => { fetchPending(); fetchPendingAdmissions(); }, 15000);
     return () => clearInterval(t);
   }, [fetchPending, fetchPendingAdmissions]);
+
+  // ── OPD bill computation ────────────────────────────────────────────────────
+  const consultationFee = parseFloat(amount) || 0;
+  const servicesTotal = addedServices.reduce((sum, s) => sum + s.amount, 0);
+  const subtotal = consultationFee + servicesTotal;
+  const discountAmountComputed = !discountType || !discountValue ? 0 :
+    Math.max(0, Math.min(
+      discountType === 'PERCENTAGE' ? (subtotal * parseFloat(discountValue)) / 100 : parseFloat(discountValue),
+      subtotal,
+    ));
+  const billTotal = Math.round((subtotal - discountAmountComputed) * 100) / 100;
+  const amountToCollect = paymentMode === 'FULL' ? billTotal : (parseFloat(partialAmount) || 0);
+
+  function addService(id: string) {
+    const svc = billableServices.find(s => s.id === id);
+    if (!svc) return;
+    setAddedServices(prev => [...prev, { serviceId: svc.id, name: svc.name, amount: parseFloat(svc.price) }]);
+    setServiceToAdd('');
+  }
+  function removeService(idx: number) {
+    setAddedServices(prev => prev.filter((_, i) => i !== idx));
+  }
+  function resetBillForm() {
+    setAmount('');
+    setAddedServices([]);
+    setDiscountType('');
+    setDiscountValue('');
+    setPaymentMode('FULL');
+    setPartialAmount('');
+  }
 
   const confirmAdmissionPayment = async () => {
     if (!selectedAdmission) return;
@@ -101,17 +157,34 @@ export default function BillingCounterPage() {
   };
 
   const confirmPayment = async () => {
-    if (!selected || !amount) return;
+    if (!selected || !amount || amountToCollect <= 0) return;
     setProcessing(true);
     try {
+      const lineItems = [
+        { description: 'Consultation Fee', amount: consultationFee },
+        ...addedServices.map(s => ({ description: s.name, amount: s.amount })),
+      ];
       await appointmentApi.post(`/appointments/${selected.id}/confirm-payment`, {
         paymentMethod,
-        amount: parseFloat(amount),
+        amount: amountToCollect,
+        lineItems,
+        discountType: discountType || undefined,
+        discountValue: discountType ? parseFloat(discountValue) || 0 : undefined,
       });
       // Store for optional receipt print
-      setLastReceipt({ patient: selected, amount: parseFloat(amount), method: paymentMethod });
+      setLastReceipt({
+        patient: selected,
+        amount: amountToCollect,
+        method: paymentMethod,
+        discountAmount: discountAmountComputed || undefined,
+        discountLabel: discountType
+          ? (discountType === 'PERCENTAGE' ? `${discountValue}% off` : `₹${discountValue} off`)
+          : undefined,
+        billTotal,
+        balanceDue: Math.max(0, Math.round((billTotal - amountToCollect) * 100) / 100) || undefined,
+      });
       setSelected(null);
-      setAmount('');
+      resetBillForm();
       setPaymentMethod('CASH');
       await fetchPending();
     } catch {
@@ -138,7 +211,11 @@ export default function BillingCounterPage() {
       },
       department:     receipt.patient.department?.name,
       chiefComplaint: receipt.patient.chiefComplaint,
-      amount:         receipt.amount,
+      amount:         receipt.billTotal ?? receipt.amount,
+      amountPaid:     receipt.amount,
+      balanceDue:     receipt.balanceDue,
+      discountAmount: receipt.discountAmount,
+      discountLabel:  receipt.discountLabel,
       paymentMethod:  receipt.method,
       tokenNumber:    receipt.patient.tokenNumber,
     });
@@ -246,7 +323,7 @@ export default function BillingCounterPage() {
         ) : (
           <div className="space-y-2">
             {filtered.map(p => (
-              <button key={p.id} onClick={() => { setSelected(p); setSelectedAdmission(null); setAmount(''); }}
+              <button key={p.id} onClick={() => { setSelected(p); setSelectedAdmission(null); resetBillForm(); }}
                 className={`w-full text-left p-4 rounded-xl border transition-all ${selected?.id === p.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-400' : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -323,10 +400,79 @@ export default function BillingCounterPage() {
                 {selected.department && <p className="text-xs text-gray-500">{selected.department.icon} {selected.department.name}</p>}
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-600 mb-1 block">Amount (₹) *</label>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Consultation Fee (₹) *</label>
                 <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" min="0" step="0.01"
                   className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium" />
               </div>
+
+              {/* Add services */}
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Add Service</label>
+                <select value={serviceToAdd} onChange={e => { if (e.target.value) addService(e.target.value); }}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">— Select a service —</option>
+                  {billableServices.map(s => (
+                    <option key={s.id} value={s.id}>{s.name} · ₹{parseFloat(s.price).toLocaleString('en-IN')}</option>
+                  ))}
+                </select>
+                {addedServices.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {addedServices.map((s, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
+                        <span className="text-gray-700">{s.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-gray-600">₹{s.amount.toLocaleString('en-IN')}</span>
+                          <button type="button" onClick={() => removeService(i)} className="text-red-400 hover:text-red-600 leading-none">×</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Discount */}
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Discount (optional)</label>
+                <div className="flex gap-2">
+                  <select value={discountType} onChange={e => setDiscountType(e.target.value as any)}
+                    className="w-24 px-2 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">None</option>
+                    <option value="PERCENTAGE">%</option>
+                    <option value="FLAT">₹ Flat</option>
+                  </select>
+                  <input type="number" min="0" step="0.01" value={discountValue} onChange={e => setDiscountValue(e.target.value)}
+                    disabled={!discountType} placeholder={discountType === 'PERCENTAGE' ? 'e.g. 10' : 'e.g. 100'}
+                    className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400" />
+                </div>
+              </div>
+
+              {/* Bill summary */}
+              <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-1 text-xs">
+                <div className="flex justify-between text-gray-500"><span>Subtotal</span><span className="font-mono">₹{subtotal.toLocaleString('en-IN')}</span></div>
+                {discountAmountComputed > 0 && (
+                  <div className="flex justify-between text-red-500"><span>Discount</span><span className="font-mono">−₹{discountAmountComputed.toLocaleString('en-IN')}</span></div>
+                )}
+                <div className="flex justify-between font-semibold text-gray-900 pt-1 border-t border-gray-200"><span>Total</span><span className="font-mono">₹{billTotal.toLocaleString('en-IN')}</span></div>
+              </div>
+
+              {/* Full vs partial */}
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-2 block">Payment</label>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  {(['FULL', 'PARTIAL'] as const).map(m => (
+                    <button key={m} type="button" onClick={() => setPaymentMode(m)}
+                      className={`py-2 text-xs font-semibold rounded-lg border transition-colors ${paymentMode === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}>
+                      {m === 'FULL' ? 'Full Payment' : 'Partial Payment'}
+                    </button>
+                  ))}
+                </div>
+                {paymentMode === 'PARTIAL' && (
+                  <input type="number" value={partialAmount} onChange={e => setPartialAmount(e.target.value)}
+                    placeholder={`Up to ₹${billTotal.toLocaleString('en-IN')}`} min="0" max={billTotal} step="0.01"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                )}
+              </div>
+
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-2 block">Payment Method</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -336,9 +482,9 @@ export default function BillingCounterPage() {
                   ))}
                 </div>
               </div>
-              <button onClick={confirmPayment} disabled={!amount || processing}
+              <button onClick={confirmPayment} disabled={!amount || amountToCollect <= 0 || processing}
                 className="w-full py-3 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors">
-                {processing ? 'Processing…' : `Confirm Payment · ₹${amount || '0'}`}
+                {processing ? 'Processing…' : `Confirm Payment · ₹${amountToCollect.toLocaleString('en-IN')}`}
               </button>
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setSelected(null)} className="flex-1 py-2 text-sm text-gray-500 hover:text-gray-700">Deselect</button>
@@ -360,10 +506,13 @@ export default function BillingCounterPage() {
                 <p className="text-xs text-gray-500">{selectedAdmission.patient?.uhid}</p>
                 <p className="text-xs text-gray-500 mt-1 font-mono">{selectedAdmission.invoiceNumber}</p>
                 {selectedAdmission.notes && <p className="text-xs text-gray-400 mt-0.5">{selectedAdmission.notes}</p>}
+                {selectedAdmission.balanceDue !== undefined && (
+                  <p className="text-xs text-purple-700 mt-1 font-medium">Balance due: ₹{parseFloat(selectedAdmission.balanceDue).toLocaleString('en-IN')}</p>
+                )}
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-600 mb-1 block">Amount (₹)</label>
-                <input type="number" value={admissionAmount} onChange={e => setAdmissionAmount(e.target.value)} placeholder="Enter admission charges"
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Amount (₹) — full or partial</label>
+                <input type="number" value={admissionAmount} onChange={e => setAdmissionAmount(e.target.value)} placeholder="Enter amount to collect"
                   min="0" step="0.01" className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium" />
               </div>
               <div>

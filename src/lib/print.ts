@@ -309,8 +309,10 @@ ${BASE_CSS}
     <div class="row"><span>Consulting Doctor</span><span>Dr. ${d.doctor.firstName} ${d.doctor.lastName}</span></div>
     ${d.department ? `<div class="row"><span>Department</span><span>${d.department}</span></div>` : ''}
     ${d.chiefComplaint ? `<div class="row"><span>Complaint</span><span>${d.chiefComplaint}</span></div>` : ''}
-    <div class="row"><span>Consultation Fee</span><span>₹${(d.consultationFee ?? d.amount).toLocaleString('en-IN')}</span></div>
-    <div class="total-row"><span>Total Paid</span><span>₹${d.amount.toLocaleString('en-IN')}</span></div>
+    <div class="row"><span>${d.amountPaid !== undefined ? 'Bill Total' : 'Consultation Fee'}</span><span>₹${(d.consultationFee ?? d.amount).toLocaleString('en-IN')}</span></div>
+    ${d.discountAmount ? `<div class="row" style="color:#b91c1c"><span>Discount${d.discountLabel ? ` (${d.discountLabel})` : ''}</span><span>−₹${d.discountAmount.toLocaleString('en-IN')}</span></div>` : ''}
+    <div class="total-row"><span>${d.amountPaid !== undefined ? 'Amount Paid' : 'Total Paid'}</span><span>₹${(d.amountPaid ?? d.amount).toLocaleString('en-IN')}</span></div>
+    ${d.balanceDue ? `<div class="row" style="color:#b45309;font-weight:bold"><span>Balance Due</span><span>₹${d.balanceDue.toLocaleString('en-IN')}</span></div>` : ''}
   </div>
 
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
