@@ -17,6 +17,7 @@ import {
   Building2,
   Stethoscope,
   Tag,
+  Receipt,
   UserCog,
   BarChart3,
   Search,
@@ -96,6 +97,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: '/doctors',     label: 'Doctors',          Icon: Stethoscope, roles: ['ADMIN'] },
       { href: '/departments', label: 'Departments',      Icon: Tag,         roles: ['ADMIN'] },
+      { href: '/billable-services', label: 'Billable Services', Icon: Receipt, roles: ['ADMIN'] },
       { href: '/staff',       label: 'Staff & Passwords', Icon: UserCog,    roles: ['ADMIN'] },
       { href: '/rooms',       label: 'Room Management',  Icon: Hotel,       roles: ['ADMIN'] },
     ],
